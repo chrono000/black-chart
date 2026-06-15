@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { useExchange } from '../lib/ExchangeContext';
 import { userApi } from '../../api/endpoints/user';
+import { publicApi } from '../../api/endpoints/public';
 import { num } from '../../api/market';
 import { selectStyle } from '../lib/ui';
 import type { CoinConfig } from '../../api/types';
@@ -54,6 +55,7 @@ export function WalletPage() {
   const [deposits, setDeposits] = useState<any[]>([]);
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const [txLoading, setTxLoading] = useState(false);
+  const [prices, setPrices] = useState<Record<string, number>>({});
 
   // Withdrawal form state
   const [wdlAddress, setWdlAddress] = useState('');
@@ -65,6 +67,30 @@ export function WalletPage() {
 
   const expandedCoinConfig = expandedCoin ? constants?.coins?.[expandedCoin] : null;
   const expandedNetworks = useMemo(() => networksFor(expandedCoinConfig), [expandedCoinConfig]);
+
+  // Coins the user actually holds (for portfolio valuation).
+  const heldCoins = useMemo(() => {
+    if (!balance) return [] as string[];
+    return Object.keys(balance)
+      .filter((k) => k.endsWith('_balance') && num(balance[k]) > 0)
+      .map((k) => k.replace('_balance', ''));
+  }, [balance]);
+  const heldKey = heldCoins.join(',');
+
+  // Fetch USDT oracle prices for held coins to value the portfolio.
+  useEffect(() => {
+    if (!heldKey) { setPrices({}); return; }
+    let cancelled = false;
+    const load = () => publicApi.getOraclePrices({ assets: heldKey, quote: 'usdt' })
+      .then((p) => { if (!cancelled) setPrices(p || {}); })
+      .catch(() => {});
+    load();
+    const id = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [heldKey]);
+
+  const priceOf = (coin: string) => (coin === 'usdt' ? 1 : num(prices[coin]));
+  const totalValue = heldCoins.reduce((sum, c) => sum + num(balance?.[`${c}_balance`]) * priceOf(c), 0);
 
   // CRITICAL: whenever the expanded coin/mode changes, fully reset BOTH forms so
   // no address/amount/otp/address from a previous coin can carry over (wrong-chain hazard).
@@ -186,7 +212,10 @@ export function WalletPage() {
 
   return (
     <div>
-      <div className="text-sec">:: wallet_balances</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
+        <span className="text-sec">:: wallet_balances</span>
+        <span className="text-sec">est. value <span className="text-up" style={{ fontWeight: 'bold' }}>≈ {totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT</span></span>
+      </div>
       <div className="divider" />
 
       <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
@@ -196,6 +225,7 @@ export function WalletPage() {
             <th>AVAILABLE</th>
             <th>IN_ORDER</th>
             <th>TOTAL</th>
+            <th>VALUE_USDT</th>
             <th>ACTION</th>
           </tr>
         </thead>
@@ -217,6 +247,7 @@ export function WalletPage() {
                 <td>{avail.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                 <td className="text-sec">{inOrder > 1e-9 ? inOrder.toLocaleString(undefined, { maximumFractionDigits: 8 }) : '-'}</td>
                 <td>{bal.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                <td className="text-sec">{(() => { const v = bal * priceOf(coin.symbol); return v > 0 ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'; })()}</td>
                 <td>
                   {allowDep ? (
                     <span role="button" tabIndex={0} className="interact" onClick={() => toggleExpand(coin.symbol, 'deposit')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(coin.symbol, 'deposit'); } }} style={{ color: isDepActive ? 'black' : '', backgroundColor: isDepActive ? 'var(--brand-up)' : '' }}>[dep]</span>
