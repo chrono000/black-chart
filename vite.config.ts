@@ -11,6 +11,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // Expose the resolved API host so the UI can show a LIVE/SANDBOX banner.
+    define: {
+      __API_HOST__: JSON.stringify(apiHost),
+    },
     server: {
       port: 5182,
       proxy: {

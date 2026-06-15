@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useExchange } from '../lib/ExchangeContext';
 import { useAuth } from '../lib/AuthContext';
@@ -6,6 +6,7 @@ import { AsciiChart } from '../components/AsciiChart';
 import { RequireLoginBlock } from '../components/RequireLoginBlock';
 import {
   getCandles, getOrderbook, getRecentTrades, getMarketTicker,
+  normalizeTrades, toPublicTrade, roundToStep,
   RESOLUTION, RES_MS, num,
   type Candle, type OrderbookSide, type PublicTrade, type MarketTicker,
 } from '../../api/market';
@@ -17,6 +18,17 @@ export type { Candle } from '../../api/market';
 
 const DEFAULT_PAIRS = ['btc-usdt', 'eth-usdt', 'xrp-usdt', 'sol-usdt', 'ada-usdt', 'doge-usdt'];
 const CHART_WIDTH = 74;
+const MARKET_FEE_PAD = 1.005; // buffer for market-buy cost vs taker fee/slippage
+
+// Accessible clickable chip (keyboard-operable span).
+function chipProps(onActivate: () => void) {
+  return {
+    role: 'button' as const,
+    tabIndex: 0,
+    onClick: onActivate,
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(); } },
+  };
+}
 
 export function TradePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -29,6 +41,7 @@ export function TradePage() {
   const [orderbook, setOrderbook] = useState<OrderbookSide | null>(null);
   const [recentTrades, setRecentTrades] = useState<PublicTrade[]>([]);
   const [ticker, setTicker] = useState<MarketTicker | null>(null);
+  const [ordersRefresh, setOrdersRefresh] = useState(0);
 
   const pairInfo = constants?.pairs?.[symbol];
   const [base, quote] = useMemo(() => {
@@ -37,7 +50,6 @@ export function TradePage() {
     return [parts[0] || 'btc', parts[1] || 'usdt'];
   }, [pairInfo, symbol]);
 
-  // Pair selector — active pairs from exchange constants, ranked by volume, current pair pinned in.
   const displayPairs = useMemo(() => {
     const active = Object.values(constants?.pairs || {}).filter((p) => p.active);
     let names = active
@@ -62,19 +74,20 @@ export function TradePage() {
     return () => { cancelled = true; };
   }, [symbol, timeframe]);
 
-  // ── Orderbook / trades / ticker: REST poll (reliable) + WS overlay (live) ──
+  // ── Orderbook / trades / ticker: live via WS, REST for seed + slow reconcile ──
   useEffect(() => {
     let cancelled = false;
     setOrderbook(null);
     setRecentTrades([]);
 
-    const poll = () => {
-      getOrderbook(symbol).then((ob) => { if (!cancelled) setOrderbook(ob); }).catch(() => {});
-      getRecentTrades(symbol).then((t) => { if (!cancelled) setRecentTrades(t); }).catch(() => {});
-      getMarketTicker(symbol).then((t) => { if (!cancelled) setTicker(t); }).catch(() => {});
-    };
-    poll();
-    const interval = setInterval(poll, 5000);
+    const loadBook = () => getOrderbook(symbol).then((ob) => { if (!cancelled) setOrderbook(ob); }).catch(() => {});
+    const loadTrades = () => getRecentTrades(symbol).then((t) => { if (!cancelled) setRecentTrades(t); }).catch(() => {});
+    const loadTicker = () => getMarketTicker(symbol).then((t) => { if (!cancelled) setTicker(t); }).catch(() => {});
+    loadBook();
+    loadTrades();
+    loadTicker();
+    const tickerInt = setInterval(loadTicker, 5000);
+    const reconcileInt = setInterval(() => { loadBook(); loadTrades(); }, 20000); // WS is primary
 
     // Live WebSocket overlay (public channels, no auth).
     ws.connect();
@@ -89,24 +102,31 @@ export function TradePage() {
     const onTrade = (msg: WsMessage) => {
       const arr = msg.data as any[] | undefined;
       if (!Array.isArray(arr) || arr.length === 0) return;
-      const mapped: PublicTrade[] = arr.map((t) => ({
-        price: num(t.price), size: num(t.size), side: t.side === 'sell' ? 'sell' : 'buy', timestamp: t.timestamp,
-      }));
-      setRecentTrades((prev) => [...mapped.reverse(), ...prev].slice(0, 30));
+      const mapped = arr.map(toPublicTrade);
+      // 'partial' is a full snapshot → replace; deltas → merge. normalizeTrades dedups+sorts.
+      if (msg.action === 'partial') setRecentTrades(normalizeTrades(mapped));
+      else setRecentTrades((prev) => normalizeTrades([...mapped, ...prev]));
     };
     const unsubOb = ws.subscribe(`orderbook:${symbol}`, onOrderbook);
     const unsubTr = ws.subscribe(`trade:${symbol}`, onTrade);
 
-    return () => { cancelled = true; clearInterval(interval); unsubOb(); unsubTr(); };
+    return () => { cancelled = true; clearInterval(tickerInt); clearInterval(reconcileInt); unsubOb(); unsubTr(); };
   }, [symbol]);
+
+  // Periodically refresh balance while authenticated (private state is REST-polled).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const id = setInterval(() => { refreshBalance(); }, 12000);
+    return () => clearInterval(id);
+  }, [isAuthenticated, refreshBalance]);
 
   const asks = useMemo(() => (orderbook?.asks || []).slice(0, 10).reverse(), [orderbook]);
   const bids = useMemo(() => (orderbook?.bids || []).slice(0, 10), [orderbook]);
 
   const lastCandleClose = chartData?.[chartData.length - 1]?.c || 0;
   const displayLast = ticker?.last || lastCandleClose;
-  const firstClose = chartData?.[0]?.o || chartData?.[0]?.c || 0;
-  const displayChange = firstClose > 0 ? ((displayLast - firstClose) / firstClose) * 100 : 0;
+  const open24h = ticker?.open ?? 0;
+  const displayChange = open24h > 0 ? ((displayLast - open24h) / open24h) * 100 : 0;
 
   const xLabels = useMemo(() => {
     if (!chartData || chartData.length === 0) return [];
@@ -133,8 +153,8 @@ export function TradePage() {
         {displayLast > 0 && (
           <span>
             {displayLast.toLocaleString(undefined, { maximumFractionDigits: 8 })}{' '}
-            <span className={displayChange >= 0 ? 'text-up' : 'text-down'}>
-              {displayChange >= 0 ? '▲' : '▼'} {Math.abs(displayChange).toFixed(2)}%
+            <span className={displayChange >= 0 ? 'text-up' : 'text-down'} title="24h change">
+              {displayChange >= 0 ? '▲' : '▼'} {Math.abs(displayChange).toFixed(2)}% <span className="text-ter">24h</span>
             </span>
           </span>
         )}
@@ -150,7 +170,7 @@ export function TradePage() {
             <span
               key={p}
               className="interact"
-              onClick={() => selectPair(p)}
+              {...chipProps(() => selectPair(p))}
               style={{
                 cursor: 'pointer', padding: '0 2px',
                 color: isActive ? 'var(--bg-primary)' : 'var(--text-secondary)',
@@ -174,7 +194,7 @@ export function TradePage() {
               return (
                 <span
                   key={tf}
-                  onClick={() => setTimeframe(tf)}
+                  {...chipProps(() => setTimeframe(tf))}
                   className="interact"
                   style={{
                     cursor: 'pointer', padding: '0 2px',
@@ -252,15 +272,16 @@ export function TradePage() {
               quote={quote}
               pairInfo={pairInfo}
               lastPrice={displayLast}
+              bestAsk={orderbook?.asks?.[0]?.[0]}
               balance={balance}
-              onPlaced={() => { refreshBalance(); }}
+              onPlaced={() => { refreshBalance(); setOrdersRefresh((n) => n + 1); }}
             />
           )}
         </div>
       </div>
 
       {/* Open Orders */}
-      {isAuthenticated && <OpenOrders symbol={symbol} onChange={() => refreshBalance()} />}
+      {isAuthenticated && <OpenOrders symbol={symbol} refreshSignal={ordersRefresh} onChange={() => { refreshBalance(); setOrdersRefresh((n) => n + 1); }} />}
 
       {/* Recent Trades */}
       <div style={{ marginTop: '20px' }}>
@@ -275,7 +296,7 @@ export function TradePage() {
                 const d = new Date(t.timestamp);
                 const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
                 return (
-                  <tr key={i} className={t.side === 'sell' ? 'text-down' : 'text-up'}>
+                  <tr key={`${t.timestamp}-${i}`} className={t.side === 'sell' ? 'text-down' : 'text-up'}>
                     <td>{timeStr}</td>
                     <td>{t.price.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                     <td>{t.size}</td>
@@ -294,7 +315,8 @@ export function TradePage() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Order entry form — real HollaEx order placement with confirm step.
+// Order entry form — real HollaEx order placement with step
+// quantization, validation, and a confirm step.
 // ─────────────────────────────────────────────────────────────
 interface OrderFormProps {
   symbol: string;
@@ -302,11 +324,12 @@ interface OrderFormProps {
   quote: string;
   pairInfo: any;
   lastPrice: number;
+  bestAsk?: number;
   balance: Record<string, number> | null;
   onPlaced: () => void;
 }
 
-function OrderForm({ symbol, base, quote, pairInfo, lastPrice, balance, onPlaced }: OrderFormProps) {
+function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance, onPlaced }: OrderFormProps) {
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [type, setType] = useState<'limit' | 'market'>('limit');
   const [price, setPrice] = useState('');
@@ -314,50 +337,62 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, balance, onPlaced
   const [confirming, setConfirming] = useState(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const submittingRef = useRef(false);
 
   const quoteAvail = num(balance?.[`${quote}_available`]);
   const baseAvail = num(balance?.[`${base}_available`]);
 
-  const priceNum = type === 'market' ? lastPrice : parseFloat(price);
-  const sizeNum = parseFloat(size);
-  const total = (Number.isFinite(priceNum) ? priceNum : 0) * (Number.isFinite(sizeNum) ? sizeNum : 0);
+  const rawSize = parseFloat(size);
+  const rawPrice = type === 'market' ? lastPrice : parseFloat(price);
+
+  // Quantize to the pair's step sizes (floor size, round price to nearest tick).
+  const qSize = roundToStep(rawSize, pairInfo?.increment_size, 'floor');
+  const qPrice = type === 'limit' ? roundToStep(rawPrice, pairInfo?.increment_price, 'round') : rawPrice;
+  const estPrice = type === 'market' ? (side === 'buy' ? (bestAsk || lastPrice) : lastPrice) : qPrice;
+  const total = (Number.isFinite(estPrice) ? estPrice : 0) * (Number.isFinite(qSize) ? qSize : 0);
 
   const validationError = useMemo(() => {
-    if (!Number.isFinite(sizeNum) || sizeNum <= 0) return 'enter a valid size';
-    if (pairInfo?.min_size && sizeNum < pairInfo.min_size) return `min size is ${pairInfo.min_size} ${base.toUpperCase()}`;
-    if (pairInfo?.max_size && sizeNum > pairInfo.max_size) return `max size is ${pairInfo.max_size} ${base.toUpperCase()}`;
+    if (!Number.isFinite(qSize) || qSize <= 0) return 'enter a valid size';
+    if (typeof pairInfo?.min_size === 'number' && qSize < pairInfo.min_size) return `min size is ${pairInfo.min_size} ${base.toUpperCase()}`;
+    if (typeof pairInfo?.max_size === 'number' && pairInfo.max_size > 0 && qSize > pairInfo.max_size) return `max size is ${pairInfo.max_size} ${base.toUpperCase()}`;
+    if (type === 'market' && !(lastPrice > 0)) return 'no market price yet — wait for data';
     if (type === 'limit') {
-      if (!Number.isFinite(priceNum) || priceNum <= 0) return 'enter a valid price';
-      if (pairInfo?.min_price && priceNum < pairInfo.min_price) return `min price is ${pairInfo.min_price}`;
+      if (!Number.isFinite(qPrice) || qPrice <= 0) return 'enter a valid price';
+      if (typeof pairInfo?.min_price === 'number' && qPrice < pairInfo.min_price) return `min price is ${pairInfo.min_price}`;
+      if (typeof pairInfo?.max_price === 'number' && pairInfo.max_price > 0 && qPrice > pairInfo.max_price) return `max price is ${pairInfo.max_price}`;
     }
-    if (side === 'buy' && total > quoteAvail) return `insufficient ${quote.toUpperCase()} (need ${total.toFixed(2)})`;
-    if (side === 'sell' && sizeNum > baseAvail) return `insufficient ${base.toUpperCase()}`;
+    const pad = type === 'market' ? MARKET_FEE_PAD : 1;
+    if (side === 'buy' && total * pad > quoteAvail) return `insufficient ${quote.toUpperCase()} (need ~${(total * pad).toFixed(2)})`;
+    if (side === 'sell' && qSize > baseAvail) return `insufficient ${base.toUpperCase()}`;
     return '';
-  }, [sizeNum, priceNum, type, side, total, quoteAvail, baseAvail, pairInfo, base, quote]);
+  }, [qSize, qPrice, type, side, total, quoteAvail, baseAvail, pairInfo, base, quote, lastPrice]);
 
   const reset = () => { setPrice(''); setSize(''); setConfirming(false); };
 
   const submit = useCallback(async () => {
+    if (submittingRef.current) return; // synchronous re-entrancy guard (sub-frame double-click)
+    submittingRef.current = true;
     setBusy(true);
     setStatus('placing order...');
     try {
       await orderApi.createOrder({
         symbol,
         side,
-        size: sizeNum,
+        size: qSize,
         type,
-        ...(type === 'limit' ? { price: priceNum } : {}),
+        ...(type === 'limit' ? { price: qPrice } : {}),
       });
       setStatus(`✓ ${side} order placed`);
       reset();
       onPlaced();
     } catch (err: any) {
-      setStatus(`✗ ${err?.message || 'order failed'}`);
+      setStatus(`✗ ${err?.isTimeout ? 'timed out — check Open Orders before retrying' : err?.message || 'order failed'}`);
       setConfirming(false);
     } finally {
       setBusy(false);
+      submittingRef.current = false;
     }
-  }, [symbol, side, sizeNum, type, priceNum, onPlaced]);
+  }, [symbol, side, qSize, type, qPrice, onPlaced]);
 
   const inputStyle = { width: '140px' } as const;
   const selectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-family)', fontSize: 'var(--font-size)', padding: '2px 4px' } as const;
@@ -429,8 +464,8 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, balance, onPlaced
       ) : (
         <div style={{ marginTop: '6px', padding: '10px', border: `1px dashed ${side === 'buy' ? 'var(--brand-up)' : 'var(--brand-down)'}` }}>
           <div style={{ marginBottom: '8px' }}>
-            confirm: <span className={side === 'buy' ? 'text-up' : 'text-down'}>{side} {sizeNum} {base.toUpperCase()}</span>
-            {type === 'limit' ? ` @ ${priceNum} ${quote.toUpperCase()}` : ' @ market'}
+            confirm: <span className={side === 'buy' ? 'text-up' : 'text-down'}>{side} {qSize} {base.toUpperCase()}</span>
+            {type === 'limit' ? ` @ ${qPrice} ${quote.toUpperCase()}` : ' @ market'}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button disabled={busy} onClick={submit} style={{ flex: 1, borderColor: side === 'buy' ? 'var(--brand-up)' : 'var(--brand-down)', color: side === 'buy' ? 'var(--brand-up)' : 'var(--brand-down)' }}>
@@ -447,9 +482,9 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, balance, onPlaced
 }
 
 // ─────────────────────────────────────────────────────────────
-// Open orders for the current pair, with cancel.
+// Open orders for the current pair, with cancel. Polls + refreshes on signal.
 // ─────────────────────────────────────────────────────────────
-function OpenOrders({ symbol, onChange }: { symbol: string; onChange: () => void }) {
+function OpenOrders({ symbol, refreshSignal, onChange }: { symbol: string; refreshSignal: number; onChange: () => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -461,7 +496,13 @@ function OpenOrders({ symbol, onChange }: { symbol: string; onChange: () => void
       .finally(() => setLoading(false));
   }, [symbol]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, refreshSignal]);
+
+  // Poll so fills/cancels from elsewhere surface without a manual refresh.
+  useEffect(() => {
+    const id = setInterval(load, 8000);
+    return () => clearInterval(id);
+  }, [load]);
 
   const cancel = async (id: string) => {
     try { await orderApi.cancelOrder(id); load(); onChange(); } catch (err: any) { alert(err?.message || 'cancel failed'); }
@@ -488,7 +529,7 @@ function OpenOrders({ symbol, onChange }: { symbol: string; onChange: () => void
                 <td>{o.size}</td>
                 <td className="text-sec">{o.filled}</td>
                 <td className="text-sec">{o.status}</td>
-                <td><span className="interact text-ter" onClick={() => cancel(o.id)}>[cancel]</span></td>
+                <td><span role="button" tabIndex={0} className="interact text-ter" onClick={() => cancel(o.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cancel(o.id); } }}>[cancel]</span></td>
               </tr>
             ))}
           </tbody>

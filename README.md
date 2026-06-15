@@ -22,8 +22,9 @@ Everything is powered by HollaEx (`/v2` REST + `/stream` WebSocket):
 | Wallet             | `/user/create-address`, `/user/request-withdrawal`, `/user/deposits`, `/user/withdrawals` |
 | Account            | `/user`, `/user/stats`, `/user/tokens` |
 
-Auth uses the bearer token from email/password login. The client also supports
-HMAC-SHA256 (api-key/secret) signing as a fallback.
+Auth uses the bearer token from email/password login. The client also implements
+HMAC-SHA256 (api-key/secret) request signing for future key-based use, but the UI
+does not currently configure API keys, so the bearer path is what runs.
 
 ## Develop
 
@@ -58,7 +59,10 @@ A static `dist/` has **no Vite proxy**, so configure where the API lives via env
    `/api/* → https://api.hollaex.com/v2/*` and `/stream → wss://api.hollaex.com/stream`.
    No env needed — the defaults (`/api`, `/stream`) just work.
 
-2. **Direct (no proxy):** point the app straight at HollaEx (relies on HollaEx CORS):
+2. **Direct (no proxy):** point the app straight at HollaEx. HollaEx CORS allows
+   this for all origins (verified — no config needed), but the reverse-proxy option
+   above is still preferred so your bearer token stays same-origin and you get
+   rate-limit shielding:
 
    ```bash
    # .env.production

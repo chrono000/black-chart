@@ -153,7 +153,10 @@ export interface Deposit {
   id: number;
   amount: number;
   currency: string;
-  status: boolean;
+  status: boolean; // false = pending/processing, true = completed
+  dismissed?: boolean;
+  dissmissed?: boolean; // API body uses this misspelling
+  rejected?: boolean;
   type: string;
   network?: string;
   transaction_id?: string;
@@ -167,7 +170,10 @@ export interface Withdrawal {
   id: number;
   amount: number;
   currency: string;
-  status: number;
+  status: boolean; // false = pending/processing, true = completed
+  dismissed?: boolean;
+  dissmissed?: boolean; // API body uses this misspelling
+  rejected?: boolean;
   type: string;
   network?: string;
   transaction_id?: string;

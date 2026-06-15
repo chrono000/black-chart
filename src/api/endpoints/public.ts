@@ -8,14 +8,14 @@ export const publicApi = {
   getKit: () => get<KitConfig>('/kit'),
   getTicker: (symbol?: string) => get<Ticker>('/ticker', { symbol }),
   getAllTickers: () => get<Record<string, Ticker>>('/tickers'),
-  getOrderbook: (symbol?: string) => get<Orderbook>('/orderbook', { symbol }),
+  getOrderbook: (symbol?: string) => get<Record<string, Orderbook>>('/orderbook', { symbol }),
   getAllOrderbooks: () => get<Record<string, Orderbook>>('/orderbooks'),
   getTrades: (symbol?: string) => get<Record<string, Trade[]>>('/trades', { symbol }),
   getTradesHistory: (params?: { symbol?: string; side?: string; limit?: number; page?: number; order_by?: string; order?: string }) =>
     get<PaginatedResponse<Trade>>('/trades/history', params),
-  getChart: (params: { from: string; to: string; symbol: string; resolution: string }) =>
+  getChart: (params: { from: number; to: number; symbol: string; resolution: string }) =>
     get<ChartData>('/chart', params),
-  getCharts: (params: { from: string; to: string; resolution: string }) =>
+  getCharts: (params: { from: number; to: number; resolution: string }) =>
     get<Record<string, ChartData>>('/charts', params),
   getMiniCharts: (params: { assets: string; from?: string; to?: string; quote?: string; period?: string }) =>
     get<Record<string, number[]>>('/minicharts', params),

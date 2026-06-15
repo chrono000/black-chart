@@ -11,11 +11,22 @@ import {
 const DEFAULT_PAIRS = ['btc-usdt', 'eth-usdt', 'xrp-usdt', 'sol-usdt', 'ada-usdt', 'doge-usdt'];
 const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d', '1w'];
 
+// Accessible clickable chip (keyboard-operable span).
+function chipProps(onActivate: () => void) {
+  return {
+    role: 'button' as const,
+    tabIndex: 0,
+    onClick: onActivate,
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(); } },
+  };
+}
+
 export function ChartPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { constants, tickers } = useExchange();
   const [symbol, setSymbol] = useState(searchParams.get('pair') || 'btc-usdt');
-  const [timeframe, setTimeframe] = useState(searchParams.get('tf') || '1d');
+  const initialTf = searchParams.get('tf') || '1d';
+  const [timeframe, setTimeframe] = useState(TIMEFRAMES.includes(initialTf) ? initialTf : '1d');
 
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
   const [chartData, setChartData] = useState<Candle[] | null>(null);
@@ -71,7 +82,7 @@ export function ChartPage() {
       if (zoomBounds && e.key === 'ArrowRight') {
         const dur = zoomBounds.t2 - zoomBounds.t1;
         const shift = dur * 0.5;
-        if (zoomBounds.t2 + shift <= Date.now() + dur) {
+        if (zoomBounds.t2 + shift <= Date.now()) {
           setZoomStack((prev) => { const s = [...prev]; s[s.length - 1] = { t1: zoomBounds.t1 + shift, t2: zoomBounds.t2 + shift }; return s; });
         }
       }
@@ -84,6 +95,8 @@ export function ChartPage() {
   useEffect(() => {
     if (!dimensions) return;
     let cancelled = false;
+    setOrderbook(null);
+    setRecentTrades([]);
 
     let resolution = RESOLUTION[timeframe] || '1D';
     let fromSec: number;
@@ -105,16 +118,16 @@ export function ChartPage() {
     const processData = (parsedAll: Candle[]) => {
       let parsed = parsedAll;
       if (zoomBounds && parsed.length > 0) {
+        // Resample to `width` columns via a single advancing pointer (data is sorted asc).
         const resampled: Candle[] = [];
         const duration = zoomBounds.t2 - zoomBounds.t1;
+        let j = 0;
         for (let i = 0; i < dimensions.width; i++) {
           const targetT = Math.floor(zoomBounds.t1 + (i / dimensions.width) * duration);
-          let closest = parsed[0];
-          let minDiff = Infinity;
-          for (const c of parsed) {
-            const diff = Math.abs(c.t - targetT);
-            if (diff < minDiff) { minDiff = diff; closest = c; }
-            if (c.t > targetT) break;
+          while (j + 1 < parsed.length && parsed[j + 1].t <= targetT) j++;
+          let closest = parsed[j];
+          if (j + 1 < parsed.length && Math.abs(parsed[j + 1].t - targetT) < Math.abs(parsed[j].t - targetT)) {
+            closest = parsed[j + 1];
           }
           resampled.push({ ...closest, t: targetT });
         }
@@ -152,23 +165,23 @@ export function ChartPage() {
 
     let intervalId: ReturnType<typeof setInterval> | undefined;
     if (!zoomBounds) {
-      intervalId = setInterval(() => { fetchChart(); fetchTicker(); }, 5000);
+      // 1W barely changes and returns a large payload — don't re-fetch it on a timer.
+      intervalId = setInterval(() => { if (resolution !== '1W') fetchChart(); fetchTicker(); }, 5000);
     }
 
     const fetchOb = () => { getOrderbook(symbol).then((ob) => { if (!cancelled) setOrderbook(ob); }).catch(() => {}); };
     const fetchTrades = () => { getRecentTrades(symbol).then((t) => { if (!cancelled) setRecentTrades(t); }).catch(() => {}); };
     fetchOb();
     fetchTrades();
-    const obInterval = setInterval(() => { fetchOb(); fetchTrades(); }, 4000);
+    const obInterval = setInterval(() => { fetchOb(); fetchTrades(); }, 5000);
 
     return () => { cancelled = true; if (intervalId) clearInterval(intervalId); clearInterval(obInterval); };
   }, [symbol, timeframe, dimensions?.width, zoomBounds]);
 
   const lastPrice = chartData?.[chartData.length - 1]?.c || 0;
   const displayLast = liveTicker?.last || lastPrice;
-  let displayChange = liveTicker ? liveTicker.changePct : 0;
-  const firstPrice = chartData?.[0]?.o || chartData?.[0]?.c || 0;
-  if (firstPrice > 0) displayChange = ((displayLast - firstPrice) / firstPrice) * 100;
+  // Headline is always the ticker's 24h change (not change-since-first-visible-candle).
+  const displayChange = liveTicker ? liveTicker.changePct : 0;
 
   const fullTimeLabels = useMemo(() => {
     if (!chartData || chartData.length === 0) return [];
@@ -192,6 +205,21 @@ export function ChartPage() {
   const chartVolumes = useMemo(() => (chartData ? chartData.map((c) => c.v || 0) : []), [chartData]);
   const chartDirections = useMemo(() => (chartData ? chartData.map((c) => (c.c >= c.o ? 'up' : 'down')) : []), [chartData]);
 
+  // Pan-right is allowed only until the window's right edge reaches ~now (one candle margin).
+  const zoomDur = zoomBounds ? zoomBounds.t2 - zoomBounds.t1 : 0;
+  const panMargin = zoomBounds && dimensions ? zoomDur / dimensions.width : 0;
+  const canPanRight = !!zoomBounds && (zoomBounds.t2 + zoomDur * 0.5 <= Date.now() + panMargin);
+  const panRight = () => {
+    if (!zoomBounds || !canPanRight) return;
+    const shift = zoomDur * 0.5;
+    setZoomStack((prev) => { const s = [...prev]; s[s.length - 1] = { t1: zoomBounds.t1 + shift, t2: zoomBounds.t2 + shift }; return s; });
+  };
+  const panLeft = () => {
+    if (!zoomBounds) return;
+    const shift = zoomDur * 0.5;
+    setZoomStack((prev) => { const s = [...prev]; s[s.length - 1] = { t1: zoomBounds.t1 - shift, t2: zoomBounds.t2 - shift }; return s; });
+  };
+
   return (
     <div style={{ padding: '10px 20px', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
@@ -204,31 +232,31 @@ export function ChartPage() {
           {zoomBounds && <span style={{ color: 'var(--text-primary)', marginLeft: '10px' }}>[ZOOM_LOCK]</span>}
           {zoomError && <span className="text-down" style={{ marginLeft: '10px', fontWeight: 'bold' }}>[ERR: MAX ZOOM]</span>}
           {isFetching && <span style={{ marginLeft: '10px', color: 'var(--text-primary)', animation: 'termPulse 0.6s ease-in-out infinite' }}>[FETCHING...]</span>}
-          <span className="interact" onClick={() => setShowMarketData((p) => !p)} style={{ marginLeft: '10px', color: showMarketData ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+          <span className="interact" {...chipProps(() => setShowMarketData((p) => !p))} style={{ marginLeft: '10px', color: showMarketData ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
             [{showMarketData ? 'M: MARKET ON' : 'M: MARKET OFF'}]
           </span>
-          <span className="interact" onClick={() => setShowVolume((p) => !p)} style={{ marginLeft: '10px', color: showVolume ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+          <span className="interact" {...chipProps(() => setShowVolume((p) => !p))} style={{ marginLeft: '10px', color: showVolume ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
             [{showVolume ? 'V: VOL ON' : 'V: VOL OFF'}]
           </span>
         </span>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           {zoomBounds && (
             <>
-              <span className="interact" onClick={() => { const shift = (zoomBounds.t2 - zoomBounds.t1) * 0.5; setZoomStack((prev) => { const s = [...prev]; s[s.length - 1] = { t1: zoomBounds.t1 - shift, t2: zoomBounds.t2 - shift }; return s; }); }} style={{ marginRight: '10px', color: 'var(--text-ter)' }}>[ {'<'} PAN ]</span>
+              <span className="interact" {...chipProps(panLeft)} style={{ marginRight: '10px', color: 'var(--text-ter)' }}>[ {'<'} PAN ]</span>
               <span
-                className={zoomBounds.t2 + (zoomBounds.t2 - zoomBounds.t1) * 0.5 <= Date.now() + (zoomBounds.t2 - zoomBounds.t1) ? 'interact' : ''}
-                onClick={() => { const shift = (zoomBounds.t2 - zoomBounds.t1) * 0.5; if (zoomBounds.t2 + shift > Date.now() + (zoomBounds.t2 - zoomBounds.t1)) return; setZoomStack((prev) => { const s = [...prev]; s[s.length - 1] = { t1: zoomBounds.t1 + shift, t2: zoomBounds.t2 + shift }; return s; }); }}
-                style={{ marginRight: '20px', color: zoomBounds.t2 + (zoomBounds.t2 - zoomBounds.t1) * 0.5 <= Date.now() + (zoomBounds.t2 - zoomBounds.t1) ? 'var(--text-ter)' : 'var(--bg-secondary)', cursor: zoomBounds.t2 + (zoomBounds.t2 - zoomBounds.t1) * 0.5 <= Date.now() + (zoomBounds.t2 - zoomBounds.t1) ? 'pointer' : 'default' }}
+                {...chipProps(panRight)}
+                className={canPanRight ? 'interact' : ''}
+                style={{ marginRight: '20px', color: canPanRight ? 'var(--text-ter)' : 'var(--bg-secondary)', cursor: canPanRight ? 'pointer' : 'default' }}
               >[ PAN {'>'} ]</span>
-              <span className="interact" style={{ marginRight: '10px', color: 'var(--text-ter)' }} onClick={() => setZoomStack((prev) => prev.slice(0, -1))}>[ - ZOOM OUT ]</span>
-              <span className="interact" style={{ marginRight: '20px', color: 'var(--bg-primary)', backgroundColor: 'var(--text-secondary)', padding: '2px 8px', fontWeight: 'bold' }} onClick={() => setZoomStack([])}>[ × EXIT ALL ZOOM (ESC) ]</span>
+              <span className="interact" {...chipProps(() => setZoomStack((prev) => prev.slice(0, -1)))} style={{ marginRight: '10px', color: 'var(--text-ter)' }}>[ - ZOOM OUT ]</span>
+              <span className="interact" {...chipProps(() => setZoomStack([]))} style={{ marginRight: '20px', color: 'var(--bg-primary)', backgroundColor: 'var(--text-secondary)', padding: '2px 8px', fontWeight: 'bold' }}>[ × EXIT ALL ZOOM (ESC) ]</span>
             </>
           )}
           {displayLast > 0 && (
             <span>
               {displayLast.toLocaleString(undefined, { maximumFractionDigits: 8 })}{' '}
               <span className={displayChange >= 0 ? 'text-up' : 'text-down'}>
-                {displayChange >= 0 ? '▲' : '▼'} {Math.abs(displayChange).toFixed(2)}%
+                {displayChange >= 0 ? '▲' : '▼'} {Math.abs(displayChange).toFixed(2)}% {!zoomBounds && <span className="text-ter">24h</span>}
               </span>
             </span>
           )}
@@ -241,7 +269,7 @@ export function ChartPage() {
         {displayPairs.map((p) => {
           const isActive = symbol === p;
           return (
-            <span key={p} className="interact" onClick={() => { setSymbol(p); setZoomStack([]); setSearchParams({ pair: p, tf: timeframe }); }} style={{ cursor: 'pointer', padding: '0 2px', color: isActive ? 'var(--bg-primary)' : 'var(--text-secondary)', backgroundColor: isActive ? 'var(--text-primary)' : 'transparent', fontWeight: isActive ? 'bold' : 'normal' }}>
+            <span key={p} className="interact" {...chipProps(() => { setSymbol(p); setZoomStack([]); setSearchParams({ pair: p, tf: timeframe }); })} style={{ cursor: 'pointer', padding: '0 2px', color: isActive ? 'var(--bg-primary)' : 'var(--text-secondary)', backgroundColor: isActive ? 'var(--text-primary)' : 'transparent', fontWeight: isActive ? 'bold' : 'normal' }}>
               {isActive ? ` ${p.toUpperCase()} ` : `[${p.toUpperCase()}]`}
             </span>
           );
@@ -254,7 +282,7 @@ export function ChartPage() {
         {TIMEFRAMES.map((tf) => {
           const isActive = timeframe === tf;
           return (
-            <span key={tf} className="interact" onClick={() => { setTimeframe(tf); setZoomStack([]); setSearchParams({ pair: symbol, tf }); }} style={{ cursor: 'pointer', padding: '0 2px', color: isActive ? 'var(--bg-primary)' : 'var(--text-secondary)', backgroundColor: isActive ? 'var(--text-primary)' : 'transparent', fontWeight: isActive ? 'bold' : 'normal' }}>
+            <span key={tf} className="interact" {...chipProps(() => { setTimeframe(tf); setZoomStack([]); setSearchParams({ pair: symbol, tf }); })} style={{ cursor: 'pointer', padding: '0 2px', color: isActive ? 'var(--bg-primary)' : 'var(--text-secondary)', backgroundColor: isActive ? 'var(--text-primary)' : 'transparent', fontWeight: isActive ? 'bold' : 'normal' }}>
               {isActive ? ` ${tf.toUpperCase()} ` : `[${tf.toUpperCase()}]`}
             </span>
           );
@@ -280,7 +308,8 @@ export function ChartPage() {
                 if (!chartData || s >= chartData.length || e >= chartData.length) return;
                 const t1 = Math.floor(chartData[s].t);
                 const t2 = Math.floor(chartData[e].t);
-                if (t2 - t1 < dimensions.width * 60000) { setZoomError(true); setTimeout(() => setZoomError(false), 2000); return; }
+                const curResMs = zoomBounds ? (zoomBounds.t2 - zoomBounds.t1) / dimensions.width : (RES_MS[RESOLUTION[timeframe] || '1D'] || 86_400_000);
+                if (t2 - t1 < curResMs * 3) { setZoomError(true); setTimeout(() => setZoomError(false), 2000); return; }
                 setZoomError(false);
                 setZoomStack((prev) => [...prev, { t1, t2 }]);
               }}
@@ -349,7 +378,7 @@ export function ChartPage() {
                     const d = new Date(t.timestamp);
                     const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
                     return (
-                      <tr key={i} className={t.side === 'sell' ? 'text-down' : 'text-up'}>
+                      <tr key={`${t.timestamp}-${i}`} className={t.side === 'sell' ? 'text-down' : 'text-up'}>
                         <td>{timeStr}</td>
                         <td>{t.price.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                         <td>{t.size}</td>

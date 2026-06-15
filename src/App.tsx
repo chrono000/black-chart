@@ -9,11 +9,26 @@ import { SignupPage } from './app/pages/SignupPage';
 import { PricesPage } from './app/pages/PricesPage';
 import { ChartPage } from './app/pages/ChartPage';
 import { useAuth } from './app/lib/AuthContext';
+import { useExchange } from './app/lib/ExchangeContext';
+
+declare const __API_HOST__: string;
+
+function resolveApi(): { host: string; isSandbox: boolean } {
+  const apiUrl = (import.meta as any).env?.VITE_API_URL as string | undefined;
+  let host = 'api.hollaex.com';
+  try {
+    host = apiUrl ? new URL(apiUrl).host : (typeof __API_HOST__ !== 'undefined' ? __API_HOST__ : host);
+  } catch { /* keep default */ }
+  return { host, isSandbox: host.includes('sandbox') };
+}
 
 function Layout() {
   const location = useLocation();
-  
+
   const { isAuthenticated } = useAuth();
+  const { constants, isLoading } = useExchange();
+  const { host, isSandbox } = resolveApi();
+  const systemStatus = isLoading ? 'connecting' : constants ? 'operational' : 'degraded';
 
   const navItems = [
     { path: '/', label: 'home' },
@@ -25,6 +40,17 @@ function Layout() {
 
   return (
     <div className="container">
+      {/* Environment banner — make real-money vs test unmistakable */}
+      <div
+        style={{
+          textAlign: 'center', padding: '3px 0', marginBottom: '10px',
+          fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px',
+          color: 'var(--bg-primary)',
+          backgroundColor: isSandbox ? '#d6a700' : 'var(--brand-down)',
+        }}
+      >
+        {isSandbox ? 'SANDBOX · TEST FUNDS' : 'LIVE · REAL FUNDS'} · {host}
+      </div>
       {/* Header / Nav */}
       <header>
         <div>black chart // hollaex</div>
@@ -70,8 +96,8 @@ function Layout() {
         <div className="divider" />
         <div className="text-ter" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span>black chart</span>
-          <span>api: <span style={{ color: 'var(--text-secondary)' }}>hollaex.com/v2</span> · data: <span style={{ color: 'var(--text-secondary)' }}>hollaex</span> · auth: <span style={{ color: 'var(--text-secondary)' }}>bearer + hmac</span></span>
-          <span>system: operational</span>
+          <span>api: <span style={{ color: 'var(--text-secondary)' }}>{host}/v2</span> · data: <span style={{ color: 'var(--text-secondary)' }}>hollaex</span> · auth: <span style={{ color: 'var(--text-secondary)' }}>bearer</span></span>
+          <span>system: <span style={{ color: systemStatus === 'degraded' ? 'var(--brand-down)' : 'var(--text-secondary)' }}>{systemStatus}</span></span>
         </div>
       </footer>
     </div>

@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════
 // HollaEx WebSocket Service — Real-time data
-// Routes through Vite proxy (/stream) to bypass CORS.
+// Routes through Vite proxy (/stream) to bypass CORS in dev.
 // ═══════════════════════════════════════════════════════════
 
 // Listeners receive the full HollaEx envelope: { topic, action, symbol, data, time }.
@@ -20,9 +20,10 @@ export class HollaExWS {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
   private subscriptions = new Set<string>();
   private authParams: string | null = null;
+  private intentionalClose = false;
+  private netListenersBound = false;
 
   constructor(baseUrl?: string) {
     // In dev, use ws(s)://<host>/stream which the Vite proxy forwards to the API.
@@ -33,27 +34,56 @@ export class HollaExWS {
     this.baseUrl = baseUrl || envUrl || `${protocol}//${window.location.host}/stream`;
   }
 
+  // For future private (order/wallet) channels — needs api-key HMAC, not the bearer.
   setAuth(apiKey: string, apiSignature: string, apiExpires: number) {
     this.authParams = `api-key=${apiKey}&api-signature=${apiSignature}&api-expires=${apiExpires}`;
   }
 
+  private handleOnline = () => {
+    this.reconnectAttempts = 0;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) this.connect();
+  };
+  private handleVisibility = () => {
+    if (document.visibilityState === 'visible' && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+      this.reconnectAttempts = 0;
+      this.connect();
+    }
+  };
+  private bindNetListeners() {
+    if (this.netListenersBound) return;
+    window.addEventListener('online', this.handleOnline);
+    document.addEventListener('visibilitychange', this.handleVisibility);
+    this.netListenersBound = true;
+  }
+  private unbindNetListeners() {
+    if (!this.netListenersBound) return;
+    window.removeEventListener('online', this.handleOnline);
+    document.removeEventListener('visibilitychange', this.handleVisibility);
+    this.netListenersBound = false;
+  }
+
   connect() {
-    if (this.ws?.readyState === WebSocket.OPEN) return;
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
+
+    this.intentionalClose = false;
+    this.bindNetListeners();
 
     const url = this.authParams ? `${this.baseUrl}?${this.authParams}` : this.baseUrl;
-    this.ws = new WebSocket(url);
+    const socket = new WebSocket(url);
+    this.ws = socket;
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (socket !== this.ws) return; // stale socket from an overlapping connect()
       this.reconnectAttempts = 0;
-      // Re-subscribe to all channels
       this.subscriptions.forEach((channel) => this.sendSubscribe(channel));
-      // Keep alive ping every 30s
+      // Idempotent: clear any prior ping before starting a fresh one.
+      this.cleanup();
       this.pingTimer = setInterval(() => {
-        this.ws?.send(JSON.stringify({ op: 'ping' }));
-      }, 30000);
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ op: 'ping' }));
+      }, 25000);
     };
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as WsMessage;
         if (msg.topic) {
@@ -64,20 +94,21 @@ export class HollaExWS {
             this.listeners.get(key)?.forEach((cb) => cb(msg));
           }
         }
-        // Also emit to wildcard listeners
         this.listeners.get('*')?.forEach((cb) => cb(msg));
       } catch {
         // ignore non-JSON messages (pong, etc.)
       }
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (socket !== this.ws) return; // a superseded socket closing — ignore
       this.cleanup();
+      if (this.intentionalClose) return;
       this.attemptReconnect();
     };
 
-    this.ws.onerror = () => {
-      this.ws?.close();
+    socket.onerror = () => {
+      socket.close();
     };
   }
 
@@ -89,12 +120,11 @@ export class HollaExWS {
   }
 
   private attemptReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectAttempts++;
-      this.connect();
-    }, delay);
+    // Capped exponential backoff, retried for the lifetime of the session
+    // (online/visibility handlers also nudge recovery). No permanent give-up.
+    const delay = Math.min(1000 * Math.pow(2, Math.min(this.reconnectAttempts, 5)), 30000);
+    this.reconnectAttempts++;
+    this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 
   private sendSubscribe(channel: string) {
@@ -117,7 +147,6 @@ export class HollaExWS {
     this.listeners.get(channel)!.add(callback);
     this.sendSubscribe(channel);
 
-    // Return unsubscribe function
     return () => {
       const set = this.listeners.get(channel);
       set?.delete(callback);
@@ -130,15 +159,24 @@ export class HollaExWS {
   }
 
   disconnect() {
+    this.intentionalClose = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     this.cleanup();
-    this.ws?.close();
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
+      this.ws.close();
+    }
     this.ws = null;
     this.subscriptions.clear();
     this.listeners.clear();
+    this.reconnectAttempts = 0;
+    this.unbindNetListeners();
   }
 
   get isConnected(): boolean {

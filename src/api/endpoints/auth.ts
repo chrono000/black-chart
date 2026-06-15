@@ -1,5 +1,5 @@
 // Auth API endpoints — from common.yaml (signup, login, verify, reset-password, passkey)
-import { get, post } from '../client';
+import { get, post, authGet } from '../client';
 
 export const authApi = {
   signup: (data: { email: string; password?: string; referral?: string; captcha?: string }) =>
@@ -28,6 +28,9 @@ export const authApi = {
 
   verifyToken: () =>
     get<{ message: string }>('/verify-token'),
+
+  logout: () =>
+    authGet<{ message: string }>('/logout'),
 
   requestResetPassword: (email: string) =>
     get<{ message: string }>('/reset-password', { email, version: 'v4' }),

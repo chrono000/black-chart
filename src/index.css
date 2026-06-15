@@ -17,6 +17,8 @@
   
   --border-light: #262626;
   --border-dark: #121212;
+  /* Alias: several chart/axis sites reference --text-ter */
+  --text-ter: #525252;
   
   --brand-up: #4ade80; /* bright green */
   --brand-down: #ef4444; /* red */
@@ -136,6 +138,16 @@ input:focus {
 .interact:hover {
   opacity: 0.7;
 }
+.interact:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 1px solid var(--text-primary);
+  outline-offset: 1px;
+}
+
+/* Shared loading pulse (used by AccountPage, etc.) */
+@keyframes termPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.pulse { animation: termPulse 1s ease-in-out infinite; }
 
 /* Responsive Breakpoints */
 @media (max-width: 900px) {

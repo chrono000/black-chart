@@ -7,15 +7,33 @@ import type { CoinConfig } from '../../api/types';
 
 type TxTab = 'deposits' | 'withdrawals';
 
+const EVM_NETWORKS = ['eth', 'matic', 'bnb', 'bsc', 'arb', 'avax', 'base', 'op', 'optimism', 'ftm', 'pol'];
+
 const networksFor = (coin?: CoinConfig | null): string[] =>
   coin?.network ? coin.network.split(',').map((n) => n.trim()).filter(Boolean) : [];
 
 const feeFor = (coin: CoinConfig | undefined | null, network: string): number | null => {
   if (!coin) return null;
   const fees = coin.withdrawal_fees;
-  if (fees && network && fees[network]) return num(fees[network].value);
+  const nets = networksFor(coin);
+  if (fees) {
+    if (network && fees[network]) return num(fees[network].value);
+    if (nets.length === 1 && fees[nets[0]]) return num(fees[nets[0]].value);
+    return null; // multi-network: no reliable fee until a network is chosen
+  }
   if (typeof coin.withdrawal_fee === 'number') return coin.withdrawal_fee;
   return null;
+};
+
+// Defense-in-depth: block an obvious wrong-chain address for well-known networks.
+// Lenient (allow) for networks we don't recognize, to avoid blocking valid withdrawals.
+const addressLooksValid = (address: string, network: string): boolean => {
+  const a = (address || '').trim();
+  if (a.length < 8 || /\s/.test(a)) return false;
+  if (network && EVM_NETWORKS.includes(network)) return /^0x[0-9a-fA-F]{40}$/.test(a);
+  if (network === 'trx' || network === 'tron') return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a);
+  if (network === 'btc') return /^(bc1|[13])[0-9A-HJ-NP-Za-km-z]{20,90}$/.test(a);
+  return true; // unknown network → basic sanity only
 };
 
 export function WalletPage() {
@@ -25,6 +43,7 @@ export function WalletPage() {
   const [expandedCoin, setExpandedCoin] = useState<string | null>(null);
   const [expandedMode, setExpandedMode] = useState<'deposit' | 'withdraw' | null>(null);
   const [depositAddress, setDepositAddress] = useState<string>('');
+  const [depositNetwork, setDepositNetwork] = useState('');
   const [depNetwork, setDepNetwork] = useState('');
   const [depBusy, setDepBusy] = useState(false);
 
@@ -43,6 +62,21 @@ export function WalletPage() {
 
   const expandedCoinConfig = expandedCoin ? constants?.coins?.[expandedCoin] : null;
   const expandedNetworks = useMemo(() => networksFor(expandedCoinConfig), [expandedCoinConfig]);
+
+  // CRITICAL: whenever the expanded coin/mode changes, fully reset BOTH forms so
+  // no address/amount/otp/address from a previous coin can carry over (wrong-chain hazard).
+  useEffect(() => {
+    setWdlAddress('');
+    setWdlAmount('');
+    setWdlOtp('');
+    setWdlStatus('');
+    setDepositAddress('');
+    setDepositNetwork('');
+    const nets = networksFor(expandedCoin ? constants?.coins?.[expandedCoin] : null);
+    const def = nets.length === 1 ? nets[0] : '';
+    setDepNetwork(def);
+    setWdlNetwork(def);
+  }, [expandedCoin, expandedMode, constants]);
 
   const fetchHistory = () => {
     if (!isAuthenticated) return;
@@ -63,14 +97,17 @@ export function WalletPage() {
     e.preventDefault();
     const amt = parseFloat(wdlAmount);
     const avail = num(balance?.[`${expandedCoin}_available`]);
+    const fee = feeFor(expandedCoinConfig, wdlNetwork);
+    if (expandedNetworks.length > 1 && !wdlNetwork) { setWdlStatus('✗ select a network first'); return; }
+    if (!addressLooksValid(wdlAddress, wdlNetwork)) { setWdlStatus(`✗ address does not look valid for the ${(wdlNetwork || expandedCoin || '').toUpperCase()} network`); return; }
     if (!Number.isFinite(amt) || amt <= 0) { setWdlStatus('✗ enter a valid amount'); return; }
     if (amt > avail) { setWdlStatus('✗ insufficient available balance'); return; }
-    if (expandedNetworks.length > 1 && !wdlNetwork) { setWdlStatus('✗ select a network'); return; }
+    if (fee !== null && amt <= fee) { setWdlStatus(`✗ amount must exceed the network fee (${fee} ${expandedCoin!.toUpperCase()})`); return; }
     setWdlBusy(true);
     setWdlStatus('processing...');
     try {
       await userApi.requestWithdrawal({
-        address: wdlAddress,
+        address: wdlAddress.trim(),
         amount: amt,
         currency: expandedCoin!,
         otp_code: wdlOtp || undefined,
@@ -83,26 +120,23 @@ export function WalletPage() {
       fetchHistory();
       refreshBalance();
     } catch (err: any) {
-      setWdlStatus(`✗ ${err.message || 'withdrawal failed'}`);
+      setWdlStatus(`✗ ${err?.isTimeout ? 'request timed out — check Withdrawal History before retrying' : err.message || 'withdrawal failed'}`);
     } finally {
       setWdlBusy(false);
     }
   };
 
   const toggleExpand = (coin: string, mode: 'deposit' | 'withdraw') => {
+    const cfg = constants?.coins?.[coin];
+    if (mode === 'deposit' && cfg?.allow_deposit === false) return;
+    if (mode === 'withdraw' && cfg?.allow_withdrawal === false) return;
     if (expandedCoin === coin && expandedMode === mode) {
       setExpandedCoin(null);
       setExpandedMode(null);
-      return;
+    } else {
+      setExpandedCoin(coin);
+      setExpandedMode(mode);
     }
-    setExpandedCoin(coin);
-    setExpandedMode(mode);
-    setWdlStatus('');
-    setDepositAddress('');
-    const nets = networksFor(constants?.coins?.[coin]);
-    const defaultNet = nets.length === 1 ? nets[0] : '';
-    setDepNetwork(defaultNet);
-    setWdlNetwork(defaultNet);
   };
 
   if (!isAuthenticated) {
@@ -120,10 +154,13 @@ export function WalletPage() {
   const coins = constants?.coins ? Object.values(constants.coins).filter((c) => c.active) : [];
   const selectedAvail = num(balance?.[`${expandedCoin}_available`]);
   const wdlFee = feeFor(expandedCoinConfig, wdlNetwork);
+  const wdlAmtNum = parseFloat(wdlAmount);
+  const netReceived = wdlFee !== null && Number.isFinite(wdlAmtNum) ? Math.max(0, wdlAmtNum - wdlFee) : null;
 
-  const networkSelect = (value: string, onChange: (v: string) => void) => (
+  const networkSelect = (value: string, onChange: (v: string) => void, disabled = false) => (
     <select
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-family)', fontSize: 'var(--font-size)', padding: '2px 4px' }}
     >
@@ -156,6 +193,8 @@ export function WalletPage() {
 
             const isDepActive = expandedCoin === coin.symbol && expandedMode === 'deposit';
             const isWdlActive = expandedCoin === coin.symbol && expandedMode === 'withdraw';
+            const allowDep = coin.allow_deposit !== false;
+            const allowWdl = coin.allow_withdrawal !== false;
 
             return (
               <tr key={coin.symbol} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
@@ -164,8 +203,16 @@ export function WalletPage() {
                 <td className="text-sec">{inOrder > 1e-9 ? inOrder.toLocaleString(undefined, { maximumFractionDigits: 8 }) : '-'}</td>
                 <td>{bal.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                 <td>
-                  <span className="interact" onClick={() => toggleExpand(coin.symbol, 'deposit')} style={{ color: isDepActive ? 'black' : '', backgroundColor: isDepActive ? 'var(--brand-up)' : '' }}>[dep]</span>{' '}
-                  <span className="interact" onClick={() => toggleExpand(coin.symbol, 'withdraw')} style={{ color: isWdlActive ? 'black' : '', backgroundColor: isWdlActive ? 'var(--brand-down)' : '' }}>[wdl]</span>
+                  {allowDep ? (
+                    <span role="button" tabIndex={0} className="interact" onClick={() => toggleExpand(coin.symbol, 'deposit')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(coin.symbol, 'deposit'); } }} style={{ color: isDepActive ? 'black' : '', backgroundColor: isDepActive ? 'var(--brand-up)' : '' }}>[dep]</span>
+                  ) : (
+                    <span className="text-ter" title="deposits disabled">[dep:off]</span>
+                  )}{' '}
+                  {allowWdl ? (
+                    <span role="button" tabIndex={0} className="interact" onClick={() => toggleExpand(coin.symbol, 'withdraw')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(coin.symbol, 'withdraw'); } }} style={{ color: isWdlActive ? 'black' : '', backgroundColor: isWdlActive ? 'var(--brand-down)' : '' }}>[wdl]</span>
+                  ) : (
+                    <span className="text-ter" title="withdrawals disabled">[wdl:off]</span>
+                  )}
                 </td>
               </tr>
             );
@@ -178,12 +225,13 @@ export function WalletPage() {
         <div style={{ margin: '15px 0', padding: '12px', border: '1px dashed var(--brand-up)' }}>
           <div style={{ marginBottom: '8px' }}>
             <span className="text-up" style={{ fontWeight: 'bold' }}>▸ deposit {expandedCoin.toUpperCase()}</span>
-            <span className="interact text-ter" onClick={() => setExpandedCoin(null)} style={{ marginLeft: '15px' }}>[close]</span>
+            <span role="button" tabIndex={0} className="interact text-ter" onClick={() => setExpandedCoin(null)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpandedCoin(null); }} style={{ marginLeft: '15px' }}>[close]</span>
           </div>
           {expandedNetworks.length > 1 && (
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
               <span className="text-ter">network</span>
-              {networkSelect(depNetwork, setDepNetwork)}
+              {networkSelect(depNetwork, (v) => { setDepNetwork(v); setDepositAddress(''); setDepositNetwork(''); }, !!depositAddress)}
+              {depositAddress && <span role="button" tabIndex={0} className="interact text-ter" onClick={() => { setDepositAddress(''); setDepositNetwork(''); }} style={{ fontSize: '11px' }}>[change network]</span>}
             </div>
           )}
           {!depositAddress ? (
@@ -194,15 +242,21 @@ export function WalletPage() {
                 try {
                   const res = await userApi.createAddress(expandedCoin, depNetwork || undefined);
                   setDepositAddress(res.address || JSON.stringify(res));
+                  setDepositNetwork((res as any).network || depNetwork);
                 } catch (err: any) { alert(err.message); } finally { setDepBusy(false); }
               }}
             >
               {depBusy ? '[generating...]' : '[generate_address]'}
             </button>
           ) : (
-            <div style={{ padding: '10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', wordBreak: 'break-all', fontFamily: 'monospace' }}>
-              {depositAddress}
-            </div>
+            <>
+              <div className="text-ter" style={{ fontSize: '11px', marginBottom: '4px' }}>
+                {expandedCoin.toUpperCase()} deposit address{depositNetwork ? ` (${depositNetwork.toUpperCase()} network — send only ${expandedCoin.toUpperCase()} on ${depositNetwork.toUpperCase()})` : ''}:
+              </div>
+              <div style={{ padding: '10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                {depositAddress}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -212,7 +266,7 @@ export function WalletPage() {
         <form onSubmit={handleWithdraw} style={{ margin: '15px 0', padding: '12px', border: '1px dashed var(--brand-down)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ marginBottom: '5px' }}>
             <span className="text-down" style={{ fontWeight: 'bold' }}>▸ withdraw {expandedCoin.toUpperCase()}</span>
-            <span className="interact text-ter" onClick={() => setExpandedCoin(null)} style={{ marginLeft: '15px' }}>[close]</span>
+            <span role="button" tabIndex={0} className="interact text-ter" onClick={() => setExpandedCoin(null)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpandedCoin(null); }} style={{ marginLeft: '15px' }}>[close]</span>
             <span className="text-sec" style={{ marginLeft: '15px', fontSize: '11px' }}>available: {selectedAvail.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span>
           </div>
 
@@ -231,11 +285,16 @@ export function WalletPage() {
             <input type="text" value={wdlOtp} onChange={(e) => setWdlOtp(e.target.value)} placeholder="[if 2fa enabled]" />
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
-            <div className="text-sec" style={{ fontSize: '11px' }}>
-              fee: {wdlFee !== null ? wdlFee : '—'} {expandedCoin.toUpperCase()}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11px' }}>
+            <div className="text-sec">
+              fee: {wdlFee !== null ? wdlFee : (expandedNetworks.length > 1 ? 'select a network' : '—')} {wdlFee !== null ? expandedCoin.toUpperCase() : ''}
               {expandedNetworks.length > 1 && wdlNetwork && <span className="text-ter"> · {wdlNetwork.toUpperCase()}</span>}
             </div>
+            {netReceived !== null && netReceived > 0 && (
+              <div className="text-sec">recipient gets: {netReceived.toLocaleString(undefined, { maximumFractionDigits: 8 })} {expandedCoin.toUpperCase()}</div>
+            )}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button type="submit" disabled={wdlBusy} className="text-down" style={{ borderColor: 'var(--brand-down)' }}>
               {wdlBusy ? '[...]' : '[confirm_withdrawal →]'}
             </button>
@@ -247,8 +306,8 @@ export function WalletPage() {
       <div style={{ marginTop: '40px' }} className="text-sec">:: transaction_history</div>
       <div className="divider" />
       <div style={{ display: 'flex', gap: '15px', marginBottom: '10px' }}>
-        <span className="interact" onClick={() => setTxTab('deposits')} style={{ color: txTab === 'deposits' ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>[deposits]</span>
-        <span className="interact" onClick={() => setTxTab('withdrawals')} style={{ color: txTab === 'withdrawals' ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>[withdrawals]</span>
+        <span role="button" tabIndex={0} className="interact" onClick={() => setTxTab('deposits')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setTxTab('deposits'); }} style={{ color: txTab === 'deposits' ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>[deposits]</span>
+        <span role="button" tabIndex={0} className="interact" onClick={() => setTxTab('withdrawals')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setTxTab('withdrawals'); }} style={{ color: txTab === 'withdrawals' ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>[withdrawals]</span>
       </div>
 
       <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: '12px' }}>
@@ -264,25 +323,28 @@ export function WalletPage() {
         </thead>
         <tbody>
           {txLoading ? (
-            <tr><td colSpan={6} className="text-ter">LOADING_HISTORY...</td></tr>
+            <tr><td colSpan={6} className="pulse text-ter">LOADING_HISTORY...</td></tr>
           ) : (
             (txTab === 'deposits' ? deposits : withdrawals).map((tx, i) => {
-              const completed = tx.status === 1 || tx.status === true || tx.status === 'COMPLETED';
-              const pending = tx.status === 0 || tx.status === false || tx.status === 'PENDING';
+              const completed = tx.status === true || tx.status === 1 || tx.status === 'COMPLETED';
+              const canceled = tx.dismissed === true || tx.dissmissed === true;
+              const rejected = tx.rejected === true;
+              const pending = !completed && !canceled && !rejected;
+              const label = rejected ? 'REJECTED' : canceled ? 'CANCELED' : completed ? 'COMPLETED' : 'PENDING';
               return (
-                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <tr key={tx.id ?? i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                   <td style={{ padding: '5px 0' }}>{new Date(tx.created_at).toLocaleString()}</td>
                   <td>{tx.currency?.toUpperCase()}</td>
                   <td className="text-ter">{(tx.network || '-').toUpperCase()}</td>
                   <td className={txTab === 'withdrawals' ? 'text-down' : 'text-up'}>{txTab === 'withdrawals' ? '-' : '+'}{num(tx.amount).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
-                  <td>{completed ? 'COMPLETED' : 'PENDING'}</td>
+                  <td className={rejected ? 'text-down' : pending ? 'text-sec' : ''}>{label}</td>
                   <td>
                     {txTab === 'withdrawals' && pending && (
-                      <span className="interact text-ter" onClick={async () => {
+                      <span role="button" tabIndex={0} className="interact text-ter" onClick={async () => {
                         if (window.confirm('cancel this withdrawal?')) {
                           try { await userApi.cancelWithdrawal(tx.id); fetchHistory(); refreshBalance(); } catch (err: any) { alert(err.message); }
                         }
-                      }}>[cancel]</span>
+                      }} onKeyDown={(e) => { if (e.key === 'Enter') { (e.currentTarget as HTMLElement).click(); } }}>[cancel]</span>
                     )}
                   </td>
                 </tr>

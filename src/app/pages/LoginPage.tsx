@@ -28,18 +28,18 @@ export function LoginPage() {
     try {
       const res = await login(email, password, otp || undefined);
       if (res.requiresOtp) {
+        // OTP requirement is signaled here (not thrown) by AuthContext.login.
         setShowOtp(true);
-        setError('otp code required — enter your 2FA code below');
+        setError(showOtp ? 'invalid 2fa code — try again' : 'enter your 2fa code to continue');
       } else {
         navigate('/');
       }
     } catch (err: any) {
-      const msg = err.message || 'login failed';
-      // Detect OTP requirement from error message
-      if (msg.toLowerCase().includes('otp') || msg.toLowerCase().includes('2fa')) {
-        setShowOtp(true);
-      }
-      setError(msg);
+      // A throw here is a genuine failure. Keep credential errors generic to
+      // avoid account-enumeration; surface actionable errors (rate limit) verbatim.
+      if (err?.isRateLimited) setError(err.message || 'rate limited — slow down');
+      else if (err?.status === 401) setError('invalid email or password');
+      else setError(err?.message || 'login failed');
     } finally {
       setLoading(false);
     }
