@@ -5,6 +5,7 @@ import { useAuth } from '../lib/AuthContext';
 import { orderApi } from '../../api/endpoints/order';
 import { publicApi } from '../../api/endpoints/public';
 import { num } from '../../api/market';
+import { selectStyle as baseSelect } from '../lib/ui';
 
 export function ConvertPage() {
   const { constants } = useExchange();
@@ -93,7 +94,7 @@ export function ConvertPage() {
 
   const swap = () => { setFrom(to); setTo(from); setAmount(''); setQuote(null); setStatus(''); };
 
-  const selectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-family)', fontSize: 'var(--font-size)', padding: '4px 6px', minWidth: '110px' } as const;
+  const selectStyle = { ...baseSelect, padding: '4px 6px', minWidth: '110px' };
 
   return (
     <div>

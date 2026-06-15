@@ -3,6 +3,7 @@ import { useAuth } from '../lib/AuthContext';
 import { useExchange } from '../lib/ExchangeContext';
 import { userApi } from '../../api/endpoints/user';
 import { num } from '../../api/market';
+import { selectStyle } from '../lib/ui';
 import type { CoinConfig } from '../../api/types';
 
 type TxTab = 'deposits' | 'withdrawals';
@@ -176,7 +177,7 @@ export function WalletPage() {
       value={value}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-family)', fontSize: 'var(--font-size)', padding: '2px 4px' }}
+      style={selectStyle}
     >
       <option value="">[select network]</option>
       {expandedNetworks.map((n) => <option key={n} value={n}>{n.toUpperCase()}</option>)}

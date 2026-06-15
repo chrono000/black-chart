@@ -1,29 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { AsciiChart } from '../components/AsciiChart';
-import { useExchange } from '../lib/ExchangeContext';
+import { useDisplayPairs } from '../lib/useDisplayPairs';
+import { chipProps } from '../lib/ui';
 import {
   getCandles, getOrderbook, getRecentTrades, getMarketTicker,
-  RESOLUTION, RES_MS, RES_LADDER, num,
+  RESOLUTION, RES_MS, RES_LADDER,
   type Candle, type OrderbookSide, type PublicTrade,
 } from '../../api/market';
 
-const DEFAULT_PAIRS = ['btc-usdt', 'eth-usdt', 'xrp-usdt', 'sol-usdt', 'ada-usdt', 'doge-usdt'];
 const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d', '1w'];
-
-// Accessible clickable chip (keyboard-operable span).
-function chipProps(onActivate: () => void) {
-  return {
-    role: 'button' as const,
-    tabIndex: 0,
-    onClick: onActivate,
-    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(); } },
-  };
-}
 
 export function ChartPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { constants, tickers } = useExchange();
   const [symbol, setSymbol] = useState(searchParams.get('pair') || 'btc-usdt');
   const initialTf = searchParams.get('tf') || '1d';
   const [timeframe, setTimeframe] = useState(TIMEFRAMES.includes(initialTf) ? initialTf : '1d');
@@ -41,16 +30,7 @@ export function ChartPage() {
   const [showMarketData, setShowMarketData] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
 
-  const displayPairs = useMemo(() => {
-    const active = Object.values(constants?.pairs || {}).filter((p) => p.active);
-    let names = active
-      .sort((a, b) => num(tickers[b.name]?.volume) - num(tickers[a.name]?.volume))
-      .map((p) => p.name);
-    if (names.length === 0) names = [...DEFAULT_PAIRS];
-    names = names.slice(0, 8);
-    if (!names.includes(symbol)) names = [symbol, ...names].slice(0, 8);
-    return names;
-  }, [constants, tickers, symbol]);
+  const displayPairs = useDisplayPairs(symbol);
 
   // 1. Calculate optimal terminal matrix bounds
   useEffect(() => {
@@ -204,6 +184,8 @@ export function ChartPage() {
   const chartClosePrices = useMemo(() => (chartData ? chartData.map((c) => c.c) : []), [chartData]);
   const chartVolumes = useMemo(() => (chartData ? chartData.map((c) => c.v || 0) : []), [chartData]);
   const chartDirections = useMemo(() => (chartData ? chartData.map((c) => (c.c >= c.o ? 'up' : 'down')) : []), [chartData]);
+  // Compute the depth-bar scale once per book update (not per row).
+  const obMaxSize = useMemo(() => (orderbook ? Math.max(...orderbook.asks.map((a) => a[1]), ...orderbook.bids.map((b) => b[1]), 1) : 1), [orderbook]);
 
   // Pan-right is allowed only until the window's right edge reaches ~now (one candle margin).
   const zoomDur = zoomBounds ? zoomBounds.t2 - zoomBounds.t1 : 0;
@@ -334,8 +316,7 @@ export function ChartPage() {
                 </thead>
                 <tbody>
                   {orderbook.asks.slice(0, 10).reverse().map((ask, i) => {
-                    const maxSize = Math.max(...orderbook.asks.map((a) => a[1]), ...orderbook.bids.map((b) => b[1]), 1);
-                    const barW = Math.max(1, Math.round((ask[1] / maxSize) * 20));
+                    const barW = Math.max(1, Math.round((ask[1] / obMaxSize) * 20));
                     return (
                       <tr key={`a${i}`} className="text-down">
                         <td>{ask[0].toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
@@ -346,8 +327,7 @@ export function ChartPage() {
                   })}
                   <tr><td colSpan={3} style={{ textAlign: 'center', padding: '4px 0' }} className="text-ter">--- spread ---</td></tr>
                   {orderbook.bids.slice(0, 10).map((bid, i) => {
-                    const maxSize = Math.max(...orderbook.asks.map((a) => a[1]), ...orderbook.bids.map((b) => b[1]), 1);
-                    const barW = Math.max(1, Math.round((bid[1] / maxSize) * 20));
+                    const barW = Math.max(1, Math.round((bid[1] / obMaxSize) * 20));
                     return (
                       <tr key={`b${i}`} className="text-up">
                         <td>{bid[0].toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>

@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useExchange } from '../lib/ExchangeContext';
 import { useAuth, type PaperApi } from '../lib/AuthContext';
+import { useDisplayPairs } from '../lib/useDisplayPairs';
+import { chipProps, selectStyle } from '../lib/ui';
 import { AsciiChart } from '../components/AsciiChart';
 import { ChartSkeleton } from '../components/ChartSkeleton';
 import { RequireLoginBlock } from '../components/RequireLoginBlock';
@@ -17,23 +19,12 @@ import type { Order } from '../../api/types';
 
 export type { Candle } from '../../api/market';
 
-const DEFAULT_PAIRS = ['btc-usdt', 'eth-usdt', 'xrp-usdt', 'sol-usdt', 'ada-usdt', 'doge-usdt'];
 const CHART_WIDTH = 74;
 const MARKET_FEE_PAD = 1.005; // buffer for market-buy cost vs taker fee/slippage
 
-// Accessible clickable chip (keyboard-operable span).
-function chipProps(onActivate: () => void) {
-  return {
-    role: 'button' as const,
-    tabIndex: 0,
-    onClick: onActivate,
-    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(); } },
-  };
-}
-
 export function TradePage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { constants, tickers } = useExchange();
+  const { constants } = useExchange();
   const { balance, isAuthenticated, isPaper, paper, refreshBalance } = useAuth();
 
   // Latest paper engine, accessed from effects without re-triggering them.
@@ -55,16 +46,7 @@ export function TradePage() {
     return [parts[0] || 'btc', parts[1] || 'usdt'];
   }, [pairInfo, symbol]);
 
-  const displayPairs = useMemo(() => {
-    const active = Object.values(constants?.pairs || {}).filter((p) => p.active);
-    let names = active
-      .sort((a, b) => num(tickers[b.name]?.volume) - num(tickers[a.name]?.volume))
-      .map((p) => p.name);
-    if (names.length === 0) names = [...DEFAULT_PAIRS];
-    names = names.slice(0, 8);
-    if (!names.includes(symbol)) names = [symbol, ...names].slice(0, 8);
-    return names;
-  }, [constants, tickers, symbol]);
+  const displayPairs = useDisplayPairs(symbol);
 
   // ── Candles (HollaEx /chart) ──
   useEffect(() => {
@@ -425,7 +407,6 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
   }, [symbol, side, qSize, type, qPrice, placeOrder, onPlaced]);
 
   const inputStyle = { width: '140px' } as const;
-  const selectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-family)', fontSize: 'var(--font-size)', padding: '2px 4px' } as const;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
