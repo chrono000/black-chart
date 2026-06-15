@@ -37,7 +37,7 @@ const addressLooksValid = (address: string, network: string): boolean => {
 };
 
 export function WalletPage() {
-  const { balance, isAuthenticated, isPaper, paper, refreshBalance } = useAuth();
+  const { balance, isAuthenticated, isPaper, paper, refreshBalance, user } = useAuth();
   const { constants } = useExchange();
 
   const [expandedCoin, setExpandedCoin] = useState<string | null>(null);
@@ -115,6 +115,8 @@ export function WalletPage() {
       } catch (err: any) { setWdlStatus(`✗ ${err?.message || 'withdrawal failed'}`); }
       return;
     }
+    // Real withdrawal: HollaEx requires OTP when 2FA is enabled, then emails a confirmation.
+    if (user?.otp_enabled && !/^\d{6}$/.test(wdlOtp)) { setWdlStatus('✗ a 6-digit 2FA (otp) code is required for withdrawals'); return; }
     setWdlBusy(true);
     setWdlStatus('processing...');
     try {
@@ -258,19 +260,31 @@ export function WalletPage() {
               {depMsg && <div style={{ fontSize: '11px', width: '100%' }} className={depMsg.startsWith('✓') ? 'text-up' : 'text-down'}>{depMsg}</div>}
             </div>
           ) : !depositAddress ? (
-            <button
-              disabled={depBusy || (expandedNetworks.length > 1 && !depNetwork)}
-              onClick={async () => {
-                setDepBusy(true);
-                try {
-                  const res = await userApi.createAddress(expandedCoin, depNetwork || undefined);
-                  setDepositAddress(res.address || JSON.stringify(res));
-                  setDepositNetwork((res as any).network || depNetwork);
-                } catch (err: any) { alert(err.message); } finally { setDepBusy(false); }
-              }}
-            >
-              {depBusy ? '[generating...]' : '[generate_address]'}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button
+                disabled={depBusy || (expandedNetworks.length > 1 && !depNetwork)}
+                onClick={async () => {
+                  setDepBusy(true);
+                  setDepMsg('');
+                  try {
+                    const res = await userApi.createAddress(expandedCoin, depNetwork || undefined);
+                    if (res.address) {
+                      setDepositAddress(res.address);
+                      setDepositNetwork((res as any).network || depNetwork);
+                    } else {
+                      // HollaEx may generate the address asynchronously — surface the
+                      // message and let the user re-check rather than dumping raw JSON.
+                      setDepMsg((res as any).message || 'address is being generated — check again in a moment');
+                    }
+                  } catch (err: any) {
+                    setDepMsg(`✗ ${err?.isTimeout ? 'timed out — try again' : err?.message || 'could not generate address'}`);
+                  } finally { setDepBusy(false); }
+                }}
+              >
+                {depBusy ? '[generating...]' : depMsg && !depMsg.startsWith('✗') ? '[check_for_address]' : '[generate_address]'}
+              </button>
+              {depMsg && <div className={depMsg.startsWith('✗') ? 'text-down' : 'text-ter'} style={{ fontSize: '11px' }}>{depMsg}</div>}
+            </div>
           ) : (
             <>
               <div className="text-ter" style={{ fontSize: '11px', marginBottom: '4px' }}>
@@ -304,8 +318,8 @@ export function WalletPage() {
             <input type="text" value={wdlAddress} onChange={(e) => setWdlAddress(e.target.value)} required placeholder="[destination_address]" />
             <span>amount</span>
             <input type="number" step="any" value={wdlAmount} onChange={(e) => setWdlAmount(e.target.value)} required placeholder="0.00" />
-            <span>otp_code</span>
-            <input type="text" value={wdlOtp} onChange={(e) => setWdlOtp(e.target.value)} placeholder="[if 2fa enabled]" />
+            <span>otp_code{user?.otp_enabled ? ' *' : ''}</span>
+            <input type="text" inputMode="numeric" maxLength={6} value={wdlOtp} onChange={(e) => setWdlOtp(e.target.value)} required={!!user?.otp_enabled} placeholder={user?.otp_enabled ? '[required — 2fa enabled]' : '[if 2fa enabled]'} />
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11px' }}>
