@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router';
 import { useExchange } from '../lib/ExchangeContext';
 import { useAuth, type PaperApi } from '../lib/AuthContext';
 import { AsciiChart } from '../components/AsciiChart';
+import { ChartSkeleton } from '../components/ChartSkeleton';
 import { RequireLoginBlock } from '../components/RequireLoginBlock';
 import {
   getCandles, getOrderbook, getRecentTrades, getMarketTicker,
@@ -227,14 +228,12 @@ export function TradePage() {
             </a>
           </div>
         </div>
-        {chartData ? (
-          chartData.length > 0 ? (
-            <AsciiChart data={chartClosePrices} height={16} width={CHART_WIDTH} xLabels={xLabels} currentPrice={displayLast} />
-          ) : (
-            <div className="text-ter">no chart data available for this period.</div>
-          )
+        {chartData === null ? (
+          <ChartSkeleton height={16} width={CHART_WIDTH} message="loading sequence..." pulseMessage />
+        ) : chartData.length > 0 ? (
+          <AsciiChart data={chartClosePrices} height={16} width={CHART_WIDTH} xLabels={xLabels} currentPrice={displayLast} />
         ) : (
-          <div className="text-ter">loading sequence...</div>
+          <ChartSkeleton height={16} width={CHART_WIDTH} message="no chart data available for this period." />
         )}
       </div>
 
@@ -271,7 +270,14 @@ export function TradePage() {
               </tbody>
             </table>
           ) : (
-            <div className="text-ter">loading orderbook...</div>
+            <table style={{ fontSize: '12px' }}>
+              <thead><tr><th>price</th><th>size</th><th>total</th></tr></thead>
+              <tbody className="pulse">
+                {Array.from({ length: 21 }).map((_, i) => (
+                  <tr key={i} className="text-ter" style={{ opacity: 0.2 }}><td>······</td><td>·····</td><td>·····</td></tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
 
@@ -323,7 +329,14 @@ export function TradePage() {
             </tbody>
           </table>
         ) : (
-          <div className="text-ter">loading trades...</div>
+          <table style={{ fontSize: '12px' }}>
+            <thead><tr><th>time</th><th>price</th><th>qty</th><th>total</th></tr></thead>
+            <tbody className="pulse">
+              {Array.from({ length: 15 }).map((_, i) => (
+                <tr key={i} className="text-ter" style={{ opacity: 0.2 }}><td>········</td><td>·····</td><td>·····</td><td>·····</td></tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </div>
