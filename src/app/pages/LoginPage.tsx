@@ -6,8 +6,10 @@ import { authApi } from '../../api/endpoints/auth';
 type Mode = 'login' | 'forgot' | 'reset';
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, paperLogin } = useAuth();
   const navigate = useNavigate();
+
+  const handlePaper = () => { paperLogin(); navigate('/'); };
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -236,6 +238,16 @@ export function LoginPage() {
       <div className="divider" />
       <div className="text-sec">
         no account? <Link to="/signup" className="text-primary">[register_here]</Link>
+      </div>
+
+      <div style={{ marginTop: '20px', padding: '12px', border: '1px dashed var(--border-light)', maxWidth: '320px' }}>
+        <div className="text-sec" style={{ marginBottom: '6px' }}>:: just exploring?</div>
+        <div className="text-ter" style={{ fontSize: '11px', marginBottom: '10px' }}>
+          try paper trading — real live market data, simulated balances. no account, no real funds.
+        </div>
+        <button onClick={handlePaper} style={{ borderColor: '#2563eb', color: '#2563eb' }}>
+          [enter_paper_trading →]
+        </button>
       </div>
     </div>
   );

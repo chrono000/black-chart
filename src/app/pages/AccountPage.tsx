@@ -6,7 +6,7 @@ import { userApi } from '../../api/endpoints/user';
 import type { ApiToken, UserStats } from '../../api/types';
 
 export function AccountPage() {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, isPaper, paper, logout } = useAuth();
   const navigate = useNavigate();
 
   const [stats, setStats] = useState<UserStats | null>(null);
@@ -18,7 +18,7 @@ export function AccountPage() {
   const [newToken, setNewToken] = useState<ApiToken | null>(null);
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isPaper) {
       setLoading(true);
       Promise.all([userApi.getUserStats(), userApi.getTokens()])
         .then(([s, t]) => {
@@ -28,7 +28,7 @@ export function AccountPage() {
         .catch(err => setError(err.message || 'failed to load account data'))
         .finally(() => setLoading(false));
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isPaper]);
 
   if (!isAuthenticated) {
     return (
@@ -96,7 +96,19 @@ export function AccountPage() {
         <div style={{ borderLeft: '1px solid var(--border-color)', paddingLeft: '30px' }}>
           <div className="text-sec">:: account_statistics</div>
           <div className="divider" />
-          {loading ? (
+          {isPaper ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div><span className="text-ter" style={{ width: '140px', display: 'inline-block' }}>mode:</span><span className="text-up">paper trading</span></div>
+              <div><span className="text-ter" style={{ width: '140px', display: 'inline-block' }}>open orders:</span><span>{paper?.orders.length ?? 0}</span></div>
+              <div><span className="text-ter" style={{ width: '140px', display: 'inline-block' }}>simulated trades:</span><span>{paper?.trades.length ?? 0}</span></div>
+              <div style={{ marginTop: '12px' }}>
+                <button
+                  onClick={() => { if (window.confirm('reset paper balances and history to defaults?')) paper?.reset(); }}
+                  style={{ borderColor: 'var(--brand-down)', color: 'var(--brand-down)' }}
+                >[reset_paper_balances]</button>
+              </div>
+            </div>
+          ) : loading ? (
             <div className="pulse">FETCHING_STATS...</div>
           ) : stats ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -117,6 +129,9 @@ export function AccountPage() {
       <div style={{ marginTop: '40px' }}>
         <div className="text-sec">:: api_token_management</div>
         <div className="divider" />
+        {isPaper ? (
+          <div className="text-ter" style={{ fontSize: '12px' }}>api tokens are unavailable in paper trading — log in with a real account to manage api keys.</div>
+        ) : (<>
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', alignItems: 'center' }}>
           <span>label</span>
           <input 
@@ -163,6 +178,7 @@ export function AccountPage() {
             ))}
           </tbody>
         </table>
+        </>)}
       </div>
       {error && <div className="text-down" style={{ marginTop: '20px' }}>! err: {error}</div>}
     </div>

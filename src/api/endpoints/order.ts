@@ -1,5 +1,5 @@
 // Order API endpoints — from order.yaml
-import { get, authGet, authPost, authDel } from '../client';
+import { authGet, authPost, authDel } from '../client';
 import type { Order, OrderRequest, PaginatedResponse, QuickTradeQuote } from '../types';
 
 export const orderApi = {
@@ -11,9 +11,10 @@ export const orderApi = {
   getAllOrders: (params?: { symbol?: string; side?: string; status?: string; open?: boolean; limit?: number; page?: number; order_by?: string; order?: string; start_date?: string; end_date?: string }) =>
     authGet<PaginatedResponse<Order>>('/orders', params),
 
-  // Quick trade (convert)
+  // Quick trade (convert). authGet so a logged-in user gets an execution `token`;
+  // unauthenticated callers still get a public price estimate (no token).
   getQuickTrade: (params: { spending_currency: string; receiving_currency: string; spending_amount?: string; receiving_amount?: string }) =>
-    get<QuickTradeQuote>('/quick-trade', params),
+    authGet<QuickTradeQuote>('/quick-trade', params),
   executeQuickTrade: (token: string) => authPost<Record<string, unknown>>('/order/execute', { token }),
 
   // Dust (small balance conversion)

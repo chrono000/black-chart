@@ -37,7 +37,7 @@ const addressLooksValid = (address: string, network: string): boolean => {
 };
 
 export function WalletPage() {
-  const { balance, isAuthenticated, refreshBalance } = useAuth();
+  const { balance, isAuthenticated, isPaper, paper, refreshBalance } = useAuth();
   const { constants } = useExchange();
 
   const [expandedCoin, setExpandedCoin] = useState<string | null>(null);
@@ -46,6 +46,8 @@ export function WalletPage() {
   const [depositNetwork, setDepositNetwork] = useState('');
   const [depNetwork, setDepNetwork] = useState('');
   const [depBusy, setDepBusy] = useState(false);
+  const [depAmount, setDepAmount] = useState('');
+  const [depMsg, setDepMsg] = useState('');
 
   const [txTab, setTxTab] = useState<TxTab>('deposits');
   const [deposits, setDeposits] = useState<any[]>([]);
@@ -72,6 +74,8 @@ export function WalletPage() {
     setWdlStatus('');
     setDepositAddress('');
     setDepositNetwork('');
+    setDepAmount('');
+    setDepMsg('');
     const nets = networksFor(expandedCoin ? constants?.coins?.[expandedCoin] : null);
     const def = nets.length === 1 ? nets[0] : '';
     setDepNetwork(def);
@@ -79,7 +83,7 @@ export function WalletPage() {
   }, [expandedCoin, expandedMode, constants]);
 
   const fetchHistory = () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || isPaper) return; // paper history is read from the engine
     setTxLoading(true);
     const fetcher = txTab === 'deposits' ? userApi.getDeposits : userApi.getWithdrawals;
     fetcher({ limit: 50 })
@@ -103,6 +107,14 @@ export function WalletPage() {
     if (!Number.isFinite(amt) || amt <= 0) { setWdlStatus('✗ enter a valid amount'); return; }
     if (amt > avail) { setWdlStatus('✗ insufficient available balance'); return; }
     if (fee !== null && amt <= fee) { setWdlStatus(`✗ amount must exceed the network fee (${fee} ${expandedCoin!.toUpperCase()})`); return; }
+    if (isPaper && paper) {
+      try {
+        paper.withdraw(expandedCoin!, amt, wdlNetwork || undefined);
+        setWdlStatus('✓ withdrawal simulated (paper)');
+        setWdlAddress(''); setWdlAmount(''); setWdlOtp('');
+      } catch (err: any) { setWdlStatus(`✗ ${err?.message || 'withdrawal failed'}`); }
+      return;
+    }
     setWdlBusy(true);
     setWdlStatus('processing...');
     try {
@@ -234,7 +246,18 @@ export function WalletPage() {
               {depositAddress && <span role="button" tabIndex={0} className="interact text-ter" onClick={() => { setDepositAddress(''); setDepositNetwork(''); }} style={{ fontSize: '11px' }}>[change network]</span>}
             </div>
           )}
-          {!depositAddress ? (
+          {isPaper ? (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input type="number" step="any" value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder={`amount ${expandedCoin.toUpperCase()}`} style={{ width: '160px' }} />
+              <button onClick={() => {
+                const a = parseFloat(depAmount);
+                if (!(a > 0)) { setDepMsg('✗ enter an amount'); return; }
+                try { paper?.deposit(expandedCoin, a, depNetwork || undefined); setDepAmount(''); setDepMsg(`✓ added ${a} ${expandedCoin.toUpperCase()} (simulated)`); } catch (err: any) { setDepMsg(`✗ ${err?.message || 'failed'}`); }
+              }}>[add_test_funds]</button>
+              <span className="text-ter" style={{ fontSize: '11px' }}>simulated faucet</span>
+              {depMsg && <div style={{ fontSize: '11px', width: '100%' }} className={depMsg.startsWith('✓') ? 'text-up' : 'text-down'}>{depMsg}</div>}
+            </div>
+          ) : !depositAddress ? (
             <button
               disabled={depBusy || (expandedNetworks.length > 1 && !depNetwork)}
               onClick={async () => {
@@ -325,7 +348,10 @@ export function WalletPage() {
           {txLoading ? (
             <tr><td colSpan={6} className="pulse text-ter">LOADING_HISTORY...</td></tr>
           ) : (
-            (txTab === 'deposits' ? deposits : withdrawals).map((tx, i) => {
+            (isPaper
+              ? (txTab === 'deposits' ? (paper?.deposits || []) : (paper?.withdrawals || []))
+              : (txTab === 'deposits' ? deposits : withdrawals)
+            ).map((tx, i) => {
               const completed = tx.status === true || tx.status === 1 || tx.status === 'COMPLETED';
               const canceled = tx.dismissed === true || tx.dissmissed === true;
               const rejected = tx.rejected === true;

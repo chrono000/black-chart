@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useExchange } from '../lib/ExchangeContext';
-import { useAuth } from '../lib/AuthContext';
+import { useAuth, type PaperApi } from '../lib/AuthContext';
 import { AsciiChart } from '../components/AsciiChart';
 import { RequireLoginBlock } from '../components/RequireLoginBlock';
 import {
@@ -33,7 +33,11 @@ function chipProps(onActivate: () => void) {
 export function TradePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { constants, tickers } = useExchange();
-  const { balance, isAuthenticated, refreshBalance } = useAuth();
+  const { balance, isAuthenticated, isPaper, paper, refreshBalance } = useAuth();
+
+  // Latest paper engine, accessed from effects without re-triggering them.
+  const paperRef = useRef(paper);
+  useEffect(() => { paperRef.current = paper; }, [paper]);
 
   const [symbol, setSymbol] = useState(searchParams.get('pair') || 'btc-usdt');
   const [timeframe, setTimeframe] = useState<string>('1d');
@@ -127,6 +131,17 @@ export function TradePage() {
   const displayLast = ticker?.last || lastCandleClose;
   const open24h = ticker?.open ?? 0;
   const displayChange = open24h > 0 ? ((displayLast - open24h) / open24h) * 100 : 0;
+
+  // Order placement routes through the paper engine in paper mode (no real API call).
+  const placeOrder = useCallback(async (req: { symbol: string; side: 'buy' | 'sell'; size: number; type: 'limit' | 'market'; price?: number }) => {
+    if (isPaper && paperRef.current) { paperRef.current.placeOrder(req, displayLast); return; }
+    await orderApi.createOrder(req);
+  }, [isPaper, displayLast]);
+
+  // Paper limit orders fill when the live price crosses them.
+  useEffect(() => {
+    if (isPaper && ticker?.last && ticker.last > 0) paperRef.current?.fillCheck(symbol, ticker.last);
+  }, [isPaper, ticker?.last, symbol]);
 
   const xLabels = useMemo(() => {
     if (!chartData || chartData.length === 0) return [];
@@ -274,6 +289,7 @@ export function TradePage() {
               lastPrice={displayLast}
               bestAsk={orderbook?.asks?.[0]?.[0]}
               balance={balance}
+              placeOrder={placeOrder}
               onPlaced={() => { refreshBalance(); setOrdersRefresh((n) => n + 1); }}
             />
           )}
@@ -281,7 +297,7 @@ export function TradePage() {
       </div>
 
       {/* Open Orders */}
-      {isAuthenticated && <OpenOrders symbol={symbol} refreshSignal={ordersRefresh} onChange={() => { refreshBalance(); setOrdersRefresh((n) => n + 1); }} />}
+      {isAuthenticated && <OpenOrders symbol={symbol} isPaper={isPaper} paper={paper} refreshSignal={ordersRefresh} onChange={() => { refreshBalance(); setOrdersRefresh((n) => n + 1); }} />}
 
       {/* Recent Trades */}
       <div style={{ marginTop: '20px' }}>
@@ -326,10 +342,11 @@ interface OrderFormProps {
   lastPrice: number;
   bestAsk?: number;
   balance: Record<string, number> | null;
+  placeOrder: (req: { symbol: string; side: 'buy' | 'sell'; size: number; type: 'limit' | 'market'; price?: number }) => Promise<void>;
   onPlaced: () => void;
 }
 
-function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance, onPlaced }: OrderFormProps) {
+function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance, placeOrder, onPlaced }: OrderFormProps) {
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [type, setType] = useState<'limit' | 'market'>('limit');
   const [price, setPrice] = useState('');
@@ -375,7 +392,7 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
     setBusy(true);
     setStatus('placing order...');
     try {
-      await orderApi.createOrder({
+      await placeOrder({
         symbol,
         side,
         size: qSize,
@@ -392,7 +409,7 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
       setBusy(false);
       submittingRef.current = false;
     }
-  }, [symbol, side, qSize, type, qPrice, onPlaced]);
+  }, [symbol, side, qSize, type, qPrice, placeOrder, onPlaced]);
 
   const inputStyle = { width: '140px' } as const;
   const selectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-light)', fontFamily: 'var(--font-family)', fontSize: 'var(--font-size)', padding: '2px 4px' } as const;
@@ -484,28 +501,37 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
 // ─────────────────────────────────────────────────────────────
 // Open orders for the current pair, with cancel. Polls + refreshes on signal.
 // ─────────────────────────────────────────────────────────────
-function OpenOrders({ symbol, refreshSignal, onChange }: { symbol: string; refreshSignal: number; onChange: () => void }) {
-  const [orders, setOrders] = useState<Order[]>([]);
+function OpenOrders({ symbol, isPaper, paper, refreshSignal, onChange }: { symbol: string; isPaper: boolean; paper: PaperApi | null; refreshSignal: number; onChange: () => void }) {
+  const [fetched, setFetched] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(() => {
+    if (isPaper) return; // paper orders come from state, no fetch
     setLoading(true);
     orderApi.getAllOrders({ symbol, open: true, limit: 50 })
-      .then((res) => setOrders(res.data || []))
-      .catch(() => setOrders([]))
+      .then((res) => setFetched(res.data || []))
+      .catch(() => setFetched([]))
       .finally(() => setLoading(false));
-  }, [symbol]);
+  }, [symbol, isPaper]);
 
   useEffect(() => { load(); }, [load, refreshSignal]);
 
-  // Poll so fills/cancels from elsewhere surface without a manual refresh.
+  // Poll so fills/cancels from elsewhere surface without a manual refresh (live only).
   useEffect(() => {
+    if (isPaper) return;
     const id = setInterval(load, 8000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, isPaper]);
+
+  const orders: Order[] = isPaper
+    ? ((paper?.orders || []).filter((o) => o.symbol === symbol) as unknown as Order[])
+    : fetched;
 
   const cancel = async (id: string) => {
-    try { await orderApi.cancelOrder(id); load(); onChange(); } catch (err: any) { alert(err?.message || 'cancel failed'); }
+    try {
+      if (isPaper) { paper?.cancelOrder(id); onChange(); }
+      else { await orderApi.cancelOrder(id); load(); onChange(); }
+    } catch (err: any) { alert(err?.message || 'cancel failed'); }
   };
 
   return (

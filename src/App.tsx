@@ -8,6 +8,7 @@ import { LoginPage } from './app/pages/LoginPage';
 import { SignupPage } from './app/pages/SignupPage';
 import { PricesPage } from './app/pages/PricesPage';
 import { ChartPage } from './app/pages/ChartPage';
+import { ConvertPage } from './app/pages/ConvertPage';
 import { useAuth } from './app/lib/AuthContext';
 import { useExchange } from './app/lib/ExchangeContext';
 
@@ -25,15 +26,21 @@ function resolveApi(): { host: string; isSandbox: boolean } {
 function Layout() {
   const location = useLocation();
 
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isPaper } = useAuth();
   const { constants, isLoading } = useExchange();
   const { host, isSandbox } = resolveApi();
   const systemStatus = isLoading ? 'connecting' : constants ? 'operational' : 'degraded';
+
+  const bannerBg = isPaper ? '#2563eb' : isSandbox ? '#d6a700' : 'var(--brand-down)';
+  const bannerText = isPaper
+    ? 'SIMULATED · PAPER TRADING'
+    : `${isSandbox ? 'SANDBOX · TEST FUNDS' : 'LIVE · REAL FUNDS'} · ${host}`;
 
   const navItems = [
     { path: '/', label: 'home' },
     { path: '/prices', label: 'prices' },
     { path: '/trade', label: 'trade' },
+    { path: '/convert', label: 'convert' },
     { path: '/wallet', label: 'wallet' },
     { path: '/account', label: 'account' },
   ];
@@ -45,11 +52,11 @@ function Layout() {
         style={{
           textAlign: 'center', padding: '3px 0', marginBottom: '10px',
           fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px',
-          color: 'var(--bg-primary)',
-          backgroundColor: isSandbox ? '#d6a700' : 'var(--brand-down)',
+          color: isPaper ? '#fff' : 'var(--bg-primary)',
+          backgroundColor: bannerBg,
         }}
       >
-        {isSandbox ? 'SANDBOX · TEST FUNDS' : 'LIVE · REAL FUNDS'} · {host}
+        {bannerText}
       </div>
       {/* Header / Nav */}
       <header>
@@ -84,6 +91,7 @@ function Layout() {
           <Route path="/" element={<HomePage />} />
           <Route path="/prices" element={<PricesPage />} />
           <Route path="/trade" element={<TradePage />} />
+          <Route path="/convert" element={<ConvertPage />} />
           <Route path="/wallet" element={<WalletPage />} />
           <Route path="/account" element={<AccountPage />} />
           <Route path="/login" element={<LoginPage />} />
