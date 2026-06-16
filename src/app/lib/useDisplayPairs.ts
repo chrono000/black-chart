@@ -5,7 +5,7 @@ import { num } from '../../api/market';
 const DEFAULT_PAIRS = ['btc-usdt', 'eth-usdt', 'xrp-usdt', 'sol-usdt', 'ada-usdt', 'doge-usdt'];
 
 // Active pairs ranked by 24h volume, capped to `limit`, with the current
-// symbol pinned in. Shared by the Trade and Chart pair selectors.
+// symbol pinned in. Shared by the Trade and Chart quick-access chips.
 export function useDisplayPairs(symbol: string, limit = 8): string[] {
   const { constants, tickers } = useExchange();
   return useMemo(() => {
@@ -18,4 +18,17 @@ export function useDisplayPairs(symbol: string, limit = 8): string[] {
     if (!names.includes(symbol)) names = [symbol, ...names].slice(0, limit);
     return names;
   }, [constants, tickers, symbol, limit]);
+}
+
+// Every active pair, volume-ranked, as SearchSelect options (full market list).
+export function useAllPairOptions(): { value: string; label: string }[] {
+  const { constants, tickers } = useExchange();
+  return useMemo(() => {
+    const opts = Object.values(constants?.pairs || {})
+      .filter((p) => p.active)
+      .sort((a, b) => num(tickers[b.name]?.volume) - num(tickers[a.name]?.volume))
+      .map((p) => ({ value: p.name, label: p.name.toUpperCase() }));
+    if (opts.length === 0) return DEFAULT_PAIRS.map((p) => ({ value: p, label: p.toUpperCase() }));
+    return opts;
+  }, [constants, tickers]);
 }

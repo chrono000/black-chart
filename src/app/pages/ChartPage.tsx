@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { AsciiChart } from '../components/AsciiChart';
-import { useDisplayPairs } from '../lib/useDisplayPairs';
+import { useDisplayPairs, useAllPairOptions } from '../lib/useDisplayPairs';
 import { chipProps } from '../lib/ui';
+import { SearchSelect } from '../components/SearchSelect';
 import {
   getCandles, getOrderbook, getRecentTrades, getMarketTicker,
   RESOLUTION, RES_MS, RES_LADDER,
@@ -31,6 +32,8 @@ export function ChartPage() {
   const [showVolume, setShowVolume] = useState(true);
 
   const displayPairs = useDisplayPairs(symbol);
+  const allPairs = useAllPairOptions();
+  const selectPair = (p: string) => { setSymbol(p); setZoomStack([]); setSearchParams({ pair: p, tf: timeframe }); };
 
   // 1. Calculate optimal terminal matrix bounds
   useEffect(() => {
@@ -246,12 +249,14 @@ export function ChartPage() {
       </div>
 
       {/* Pair Selector */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
         <span className="text-ter" style={{ marginRight: '4px' }}>pair:</span>
+        <SearchSelect value={symbol} options={allPairs} onChange={selectPair} placeholder="search market" style={{ flex: '0 0 150px' }} />
+        <span className="text-ter" style={{ fontSize: '11px' }}>quick:</span>
         {displayPairs.map((p) => {
           const isActive = symbol === p;
           return (
-            <span key={p} className="interact" {...chipProps(() => { setSymbol(p); setZoomStack([]); setSearchParams({ pair: p, tf: timeframe }); })} style={{ cursor: 'pointer', padding: '0 2px', color: isActive ? 'var(--bg-primary)' : 'var(--text-secondary)', backgroundColor: isActive ? 'var(--text-primary)' : 'transparent', fontWeight: isActive ? 'bold' : 'normal' }}>
+            <span key={p} className="interact" {...chipProps(() => selectPair(p))} style={{ cursor: 'pointer', padding: '0 2px', color: isActive ? 'var(--bg-primary)' : 'var(--text-secondary)', backgroundColor: isActive ? 'var(--text-primary)' : 'transparent', fontWeight: isActive ? 'bold' : 'normal' }}>
               {isActive ? ` ${p.toUpperCase()} ` : `[${p.toUpperCase()}]`}
             </span>
           );

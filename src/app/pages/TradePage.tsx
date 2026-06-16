@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useExchange } from '../lib/ExchangeContext';
 import { useAuth, type PaperApi } from '../lib/AuthContext';
-import { useDisplayPairs } from '../lib/useDisplayPairs';
+import { useDisplayPairs, useAllPairOptions } from '../lib/useDisplayPairs';
 import { chipProps, selectStyle } from '../lib/ui';
+import { SearchSelect } from '../components/SearchSelect';
 import { AsciiChart } from '../components/AsciiChart';
 import { ChartSkeleton } from '../components/ChartSkeleton';
 import { RequireLoginBlock } from '../components/RequireLoginBlock';
@@ -47,6 +48,7 @@ export function TradePage() {
   }, [pairInfo, symbol]);
 
   const displayPairs = useDisplayPairs(symbol);
+  const allPairs = useAllPairOptions();
 
   // ── Candles (HollaEx /chart) ──
   useEffect(() => {
@@ -160,8 +162,10 @@ export function TradePage() {
       <div className="divider" />
 
       {/* Pair Selector */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap', alignItems: 'center' }}>
         <span className="text-ter" style={{ marginRight: '4px' }}>pair:</span>
+        <SearchSelect value={symbol} options={allPairs} onChange={selectPair} placeholder="search market" style={{ flex: '0 0 150px' }} />
+        <span className="text-ter" style={{ fontSize: '11px' }}>quick:</span>
         {displayPairs.map((p) => {
           const isActive = symbol === p;
           return (
