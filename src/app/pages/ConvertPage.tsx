@@ -5,14 +5,18 @@ import { useAuth } from '../lib/AuthContext';
 import { orderApi } from '../../api/endpoints/order';
 import { publicApi } from '../../api/endpoints/public';
 import { num } from '../../api/market';
-import { selectStyle as baseSelect } from '../lib/ui';
+import { SearchSelect } from '../components/SearchSelect';
 
 export function ConvertPage() {
   const { constants } = useExchange();
   const { isAuthenticated, isPaper, balance, paper, refreshBalance } = useAuth();
 
-  const coins = useMemo(
-    () => Object.values(constants?.coins || {}).filter((c) => c.active).map((c) => c.symbol).sort(),
+  const coinOptions = useMemo(
+    () => Object.values(constants?.coins || {})
+      .filter((c) => c.active)
+      .map((c) => c.symbol)
+      .sort()
+      .map((s) => ({ value: s, label: s.toUpperCase() })),
     [constants],
   );
 
@@ -107,8 +111,6 @@ export function ConvertPage() {
 
   const swap = () => { setFrom(to); setTo(from); setAmount(''); setQuote(null); setStatus(''); setConfirming(false); setResult(null); };
 
-  const selectStyle = { ...baseSelect, padding: '4px 6px', minWidth: '110px' };
-
   return (
     <div>
       <div className="text-sec">:: convert</div>
@@ -129,9 +131,7 @@ export function ConvertPage() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <select value={from} onChange={(e) => setFrom(e.target.value)} style={selectStyle}>
-              {coins.map((c) => <option key={c} value={c}>{c.toUpperCase()}</option>)}
-            </select>
+            <SearchSelect value={from} options={coinOptions} onChange={setFrom} placeholder="search coin" style={{ flex: '0 0 130px' }} />
             <input type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
           </div>
         </div>
@@ -146,9 +146,7 @@ export function ConvertPage() {
         <div>
           <div className="text-ter" style={{ marginBottom: '4px' }}>to</div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <select value={to} onChange={(e) => setTo(e.target.value)} style={selectStyle}>
-              {coins.map((c) => <option key={c} value={c}>{c.toUpperCase()}</option>)}
-            </select>
+            <SearchSelect value={to} options={coinOptions} onChange={setTo} placeholder="search coin" style={{ flex: '0 0 130px' }} />
             <input
               type="text"
               readOnly
