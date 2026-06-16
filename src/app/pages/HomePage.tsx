@@ -90,7 +90,10 @@ export function HomePage() {
 
         {/* ANNOUNCEMENTS */}
         <div>
-          <div className="text-sec" style={{ marginBottom: '10px' }}>[ announcements ]</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '10px' }}>
+            <span className="text-sec">[ announcements ]</span>
+            <Link to="/events" className="text-primary" style={{ fontSize: '12px' }}>[see all events →]</Link>
+          </div>
           {announcements.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {announcements.slice(0, 5).map((a) => (
