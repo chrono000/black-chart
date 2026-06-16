@@ -69,6 +69,7 @@ export function WalletPage() {
   const [wdlNetwork, setWdlNetwork] = useState('');
   const [wdlStatus, setWdlStatus] = useState('');
   const [wdlBusy, setWdlBusy] = useState(false);
+  const [savedIdx, setSavedIdx] = useState(''); // selected whitelist-address index ('' = custom)
 
   const expandedCoinConfig = expandedCoin ? constants?.coins?.[expandedCoin] : null;
   const expandedNetworks = useMemo(() => networksFor(expandedCoinConfig), [expandedCoinConfig]);
@@ -145,6 +146,7 @@ export function WalletPage() {
     setWdlAmount('');
     setWdlOtp('');
     setWdlStatus('');
+    setSavedIdx('');
     setDepositAddress('');
     setDepositNetwork('');
     setDepAmount('');
@@ -240,6 +242,7 @@ export function WalletPage() {
 
   const coins = constants?.coins ? Object.values(constants.coins).filter((c) => c.active) : [];
   const selectedAvail = num(balance?.[`${expandedCoin}_available`]);
+  const wdlFromBook = savedIdx !== '';
   const wdlFee = feeFor(expandedCoinConfig, wdlNetwork);
   const wdlAmtNum = parseFloat(wdlAmount);
   const netReceived = wdlFee !== null && Number.isFinite(wdlAmtNum) ? Math.max(0, wdlAmtNum - wdlFee) : null;
@@ -389,15 +392,21 @@ export function WalletPage() {
             {expandedNetworks.length > 1 && (
               <>
                 <span>network</span>
-                {networkSelect(wdlNetwork, setWdlNetwork)}
+                {networkSelect(wdlNetwork, (v) => { setWdlNetwork(v); if (savedIdx !== '') { setSavedIdx(''); setWdlAddress(''); } })}
               </>
             )}
             {coinAddresses.length > 0 && (
               <>
                 <span>saved</span>
                 <select
-                  defaultValue=""
-                  onChange={(e) => { const a = coinAddresses[Number(e.target.value)]; if (a) { setWdlAddress(a.address); if (a.network) setWdlNetwork(a.network); } }}
+                  value={savedIdx}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSavedIdx(v);
+                    if (v === '') { setWdlAddress(''); return; }
+                    const a = coinAddresses[Number(v)];
+                    if (a) { setWdlAddress(a.address); if (a.network) setWdlNetwork(a.network); }
+                  }}
                   style={selectStyle}
                 >
                   <option value="">[choose whitelisted address]</option>
@@ -408,20 +417,37 @@ export function WalletPage() {
               </>
             )}
             <span>address</span>
-            <input type="text" value={wdlAddress} onChange={(e) => setWdlAddress(e.target.value)} required placeholder="[destination_address]" />
+            <input
+              type="text"
+              value={wdlAddress}
+              onChange={(e) => setWdlAddress(e.target.value)}
+              required
+              readOnly={wdlFromBook}
+              placeholder="[destination_address]"
+              style={wdlFromBook ? { borderColor: 'var(--brand-up)', color: 'var(--text-secondary)', cursor: 'not-allowed' } : undefined}
+            />
             <span>amount</span>
             <input type="number" step="any" value={wdlAmount} onChange={(e) => setWdlAmount(e.target.value)} required placeholder="0.00" />
             <span>otp_code{user?.otp_enabled ? ' *' : ''}</span>
             <input type="text" inputMode="numeric" maxLength={6} value={wdlOtp} onChange={(e) => setWdlOtp(e.target.value)} required={!!user?.otp_enabled} placeholder={user?.otp_enabled ? '[required — 2fa enabled]' : '[if 2fa enabled]'} />
           </div>
 
-          {wdlAddress.trim() && !coinAddresses.some((a) => a.address === wdlAddress.trim()) && (
+          {wdlFromBook ? (
+            <div style={{ fontSize: '11px' }} className="text-up">
+              ✓ using whitelisted address
+              <span role="button" tabIndex={0} className="interact text-ter" style={{ marginLeft: '10px' }}
+                onClick={() => { setSavedIdx(''); setWdlAddress(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSavedIdx(''); setWdlAddress(''); } }}>
+                [use a different address]
+              </span>
+            </div>
+          ) : wdlAddress.trim() && !coinAddresses.some((a) => a.address === wdlAddress.trim()) ? (
             <div style={{ fontSize: '11px' }}>
               <span role="button" tabIndex={0} className="interact text-ter" onClick={saveAddress} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); saveAddress(); } }}>
                 [+ save address to whitelist]
               </span>
             </div>
-          )}
+          ) : null}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11px' }}>
             <div className="text-sec">
