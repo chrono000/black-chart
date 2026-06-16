@@ -7,11 +7,28 @@ import { num } from '../../api/market';
 import { selectStyle } from '../lib/ui';
 import { safeStorage } from '../lib/storage';
 import { PortfolioPerformance } from '../components/PortfolioPerformance';
+import { SearchSelect } from '../components/SearchSelect';
 import type { CoinConfig, AddressBookEntry } from '../../api/types';
 
 type TxTab = 'deposits' | 'withdrawals';
 
 const PAPER_AB_KEY = 'black_chart_paper_addressbook';
+
+// A realistic-looking (but fake) deposit address for paper mode, so the demo
+// mirrors the real deposit UX. Format matches the network family.
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const randStr = (chars: string, n: number) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+function fakeDepositAddress(coin: string, network: string): string {
+  const n = (network || coin || '').toLowerCase();
+  if (EVM_NETWORKS.includes(n)) return '0x' + randStr('0123456789abcdef', 40);
+  if (n === 'trx' || n === 'tron') return 'T' + randStr(B58, 33);
+  if (n === 'btc') return 'bc1q' + randStr('023456789acdefghjklmnpqrstuvwxyz', 38);
+  if (n === 'ltc') return 'ltc1q' + randStr('023456789acdefghjklmnpqrstuvwxyz', 38);
+  if (n === 'xrp') return 'r' + randStr(B58, 33);
+  if (n === 'sol') return randStr(B58, 43);
+  if (n === 'xlm') return 'G' + randStr('ABCDEFGHIJKLMNOPQRSTUVWXYZ234567', 55);
+  return randStr(B58, 34);
+}
 
 const EVM_NETWORKS = ['eth', 'matic', 'bnb', 'bsc', 'arb', 'avax', 'base', 'op', 'optimism', 'ftm', 'pol'];
 
@@ -116,6 +133,15 @@ export function WalletPage() {
     () => addressBook.filter((a) => a.address && (!a.currency || a.currency === expandedCoin)),
     [addressBook, expandedCoin],
   );
+
+  // All coins allowed for the current action (deposit vs withdraw) — for the picker.
+  const coinPickerOptions = useMemo(() => {
+    const list = constants?.coins ? Object.values(constants.coins).filter((c) => c.active) : [];
+    return list
+      .filter((c) => (expandedMode === 'deposit' ? c.allow_deposit !== false : c.allow_withdrawal !== false))
+      .map((c) => ({ value: c.symbol, label: c.symbol.toUpperCase() }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [constants, expandedMode]);
 
   const saveAddress = async () => {
     const addr = wdlAddress.trim();
@@ -228,6 +254,14 @@ export function WalletPage() {
     }
   };
 
+  // General entry point: open the deposit/withdraw flow for any coin (picker-driven).
+  const openGeneral = (mode: 'deposit' | 'withdraw') => {
+    const list = Object.values(constants?.coins || {}).filter((c) => c.active && (mode === 'deposit' ? c.allow_deposit !== false : c.allow_withdrawal !== false));
+    const first = list.find((c) => c.symbol === 'btc') || list[0];
+    setExpandedMode(mode);
+    setExpandedCoin(first?.symbol || 'btc');
+  };
+
   if (!isAuthenticated) {
     return (
       <div>
@@ -266,6 +300,12 @@ export function WalletPage() {
         <span className="text-sec">est. value <span className="text-up" style={{ fontWeight: 'bold' }}>≈ {totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT</span></span>
       </div>
       <div className="divider" />
+
+      {/* General deposit/withdraw — pick any coin, not just the ones listed below */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '14px' }}>
+        <button onClick={() => openGeneral('deposit')} style={{ borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}>[+ deposit]</button>
+        <button onClick={() => openGeneral('withdraw')} style={{ borderColor: 'var(--brand-down)', color: 'var(--brand-down)' }}>[- withdraw]</button>
+      </div>
 
       <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
         <thead>
@@ -322,31 +362,32 @@ export function WalletPage() {
             <span className="text-up" style={{ fontWeight: 'bold' }}>▸ deposit {expandedCoin.toUpperCase()}</span>
             <span role="button" tabIndex={0} className="interact text-ter" onClick={() => setExpandedCoin(null)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpandedCoin(null); }} style={{ marginLeft: '15px' }}>[close]</span>
           </div>
+          {/* coin picker — deposit any coin, not just the ones listed */}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
+            <span className="text-ter" style={{ width: '90px' }}>coin</span>
+            <SearchSelect value={expandedCoin} options={coinPickerOptions} onChange={(c) => setExpandedCoin(c)} placeholder="search coin" style={{ flex: '0 0 160px' }} />
+          </div>
           {expandedNetworks.length > 1 && (
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
-              <span className="text-ter">network</span>
+              <span className="text-ter" style={{ width: '90px' }}>network</span>
               {networkSelect(depNetwork, (v) => { setDepNetwork(v); setDepositAddress(''); setDepositNetwork(''); }, !!depositAddress)}
               {depositAddress && <span role="button" tabIndex={0} className="interact text-ter" onClick={() => { setDepositAddress(''); setDepositNetwork(''); }} style={{ fontSize: '11px' }}>[change network]</span>}
             </div>
           )}
-          {isPaper ? (
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <input type="number" step="any" value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder={`amount ${expandedCoin.toUpperCase()}`} style={{ width: '160px' }} />
-              <button onClick={() => {
-                const a = parseFloat(depAmount);
-                if (!(a > 0)) { setDepMsg('✗ enter an amount'); return; }
-                try { paper?.deposit(expandedCoin, a, depNetwork || undefined); setDepAmount(''); setDepMsg(`✓ added ${a} ${expandedCoin.toUpperCase()} (simulated)`); } catch (err: any) { setDepMsg(`✗ ${err?.message || 'failed'}`); }
-              }}>[add_test_funds]</button>
-              <span className="text-ter" style={{ fontSize: '11px' }}>simulated faucet</span>
-              {depMsg && <div style={{ fontSize: '11px', width: '100%' }} className={depMsg.startsWith('✓') ? 'text-up' : 'text-down'}>{depMsg}</div>}
-            </div>
-          ) : !depositAddress ? (
+
+          {!depositAddress ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
                 disabled={depBusy || (expandedNetworks.length > 1 && !depNetwork)}
                 onClick={async () => {
                   setDepBusy(true);
                   setDepMsg('');
+                  if (isPaper) {
+                    setDepositAddress(fakeDepositAddress(expandedCoin, depNetwork));
+                    setDepositNetwork(depNetwork || expandedNetworks[0] || expandedCoin);
+                    setDepBusy(false);
+                    return;
+                  }
                   try {
                     const res = await userApi.createAddress(expandedCoin, depNetwork || undefined);
                     if (res.address) {
@@ -362,17 +403,37 @@ export function WalletPage() {
                   } finally { setDepBusy(false); }
                 }}
               >
-                {depBusy ? '[generating...]' : depMsg && !depMsg.startsWith('✗') ? '[check_for_address]' : '[generate_address]'}
+                {depBusy ? '[generating...]' : (!isPaper && depMsg && !depMsg.startsWith('✗')) ? '[check_for_address]' : '[generate_address]'}
               </button>
-              {depMsg && <div className={depMsg.startsWith('✗') ? 'text-down' : 'text-ter'} style={{ fontSize: '11px' }}>{depMsg}</div>}
+              {!isPaper && depMsg && <div className={depMsg.startsWith('✗') ? 'text-down' : 'text-ter'} style={{ fontSize: '11px' }}>{depMsg}</div>}
             </div>
           ) : (
             <>
               <div className="text-ter" style={{ fontSize: '11px', marginBottom: '4px' }}>
                 {expandedCoin.toUpperCase()} deposit address{depositNetwork ? ` (${depositNetwork.toUpperCase()} network — send only ${expandedCoin.toUpperCase()} on ${depositNetwork.toUpperCase()})` : ''}:
+                {isPaper && <span className="text-down"> · simulated</span>}
               </div>
               <div style={{ padding: '10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', wordBreak: 'break-all', fontFamily: 'monospace' }}>
                 {depositAddress}
+              </div>
+              <div style={{ marginTop: '6px' }}>
+                <span role="button" tabIndex={0} className="interact text-ter" style={{ fontSize: '11px' }} onClick={() => { setDepositAddress(''); setDepositNetwork(''); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDepositAddress(''); setDepositNetwork(''); } }}>[new address]</span>
+              </div>
+            </>
+          )}
+
+          {isPaper && (
+            <>
+              <div className="divider" style={{ margin: '12px 0' }} />
+              <div className="text-ter" style={{ fontSize: '11px', marginBottom: '6px' }}>simulated deposits aren't on-chain — use the faucet to credit your paper balance:</div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <input type="number" step="any" value={depAmount} onChange={(e) => setDepAmount(e.target.value)} placeholder={`amount ${expandedCoin.toUpperCase()}`} style={{ width: '160px' }} />
+                <button onClick={() => {
+                  const a = parseFloat(depAmount);
+                  if (!(a > 0)) { setDepMsg('✗ enter an amount'); return; }
+                  try { paper?.deposit(expandedCoin, a, depNetwork || undefined); setDepAmount(''); setDepMsg(`✓ added ${a} ${expandedCoin.toUpperCase()} (simulated)`); } catch (err: any) { setDepMsg(`✗ ${err?.message || 'failed'}`); }
+                }}>[add_test_funds]</button>
+                {depMsg && <div style={{ fontSize: '11px', width: '100%' }} className={depMsg.startsWith('✓') ? 'text-up' : 'text-down'}>{depMsg}</div>}
               </div>
             </>
           )}
@@ -386,6 +447,11 @@ export function WalletPage() {
             <span className="text-down" style={{ fontWeight: 'bold' }}>▸ withdraw {expandedCoin.toUpperCase()}</span>
             <span role="button" tabIndex={0} className="interact text-ter" onClick={() => setExpandedCoin(null)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpandedCoin(null); }} style={{ marginLeft: '15px' }}>[close]</span>
             <span className="text-sec" style={{ marginLeft: '15px', fontSize: '11px' }}>available: {selectedAvail.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <span style={{ width: '90px' }}>coin</span>
+            <SearchSelect value={expandedCoin} options={coinPickerOptions} onChange={(c) => setExpandedCoin(c)} placeholder="search coin" style={{ flex: '0 0 160px' }} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px', alignItems: 'center' }}>
