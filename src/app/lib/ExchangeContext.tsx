@@ -15,6 +15,8 @@ interface ExchangeState {
   theme: ThemeMode;
   toggleTheme: () => void;
   setTheme: (mode: ThemeMode) => void;
+  displayCurrency: string;
+  setDisplayCurrency: (ccy: string) => void;
   isLoading: boolean;
   refreshTickers: () => Promise<void>;
 }
@@ -22,6 +24,7 @@ interface ExchangeState {
 const ExchangeContext = createContext<ExchangeState | null>(null);
 
 const THEME_KEY = 'hollaex_lite_theme';
+const DISPLAY_CCY_KEY = 'black_chart_display_ccy';
 
 export function ExchangeProvider({ children }: { children: ReactNode }) {
   const [constants, setConstants] = useState<ExchangeConstants | null>(null);
@@ -47,6 +50,13 @@ export function ExchangeProvider({ children }: { children: ReactNode }) {
 
   const setTheme = useCallback((mode: ThemeMode) => setThemeState(mode), []);
   const toggleTheme = useCallback(() => setThemeState((t) => (t === 'dark' ? 'light' : 'dark')), []);
+
+  const [displayCurrency, setDisplayCurrencyState] = useState<string>(() => safeStorage.get(DISPLAY_CCY_KEY) || 'usdt');
+  const setDisplayCurrency = useCallback((ccy: string) => {
+    const c = (ccy || 'usdt').toLowerCase();
+    setDisplayCurrencyState(c);
+    safeStorage.set(DISPLAY_CCY_KEY, c);
+  }, []);
 
   // Load exchange config on mount
   useEffect(() => {
@@ -75,8 +85,8 @@ export function ExchangeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<ExchangeState>(() => ({
-    constants, kit, tickers, theme, toggleTheme, setTheme, isLoading, refreshTickers,
-  }), [constants, kit, tickers, theme, toggleTheme, setTheme, isLoading, refreshTickers]);
+    constants, kit, tickers, theme, toggleTheme, setTheme, displayCurrency, setDisplayCurrency, isLoading, refreshTickers,
+  }), [constants, kit, tickers, theme, toggleTheme, setTheme, displayCurrency, setDisplayCurrency, isLoading, refreshTickers]);
 
   return <ExchangeContext.Provider value={value}>{children}</ExchangeContext.Provider>;
 }

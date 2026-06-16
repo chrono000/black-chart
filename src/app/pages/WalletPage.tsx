@@ -61,7 +61,8 @@ const addressLooksValid = (address: string, network: string): boolean => {
 
 export function WalletPage() {
   const { balance, isAuthenticated, isPaper, paper, refreshBalance, user } = useAuth();
-  const { constants } = useExchange();
+  const { constants, displayCurrency } = useExchange();
+  const CCY = displayCurrency.toUpperCase();
 
   const [expandedCoin, setExpandedCoin] = useState<string | null>(null);
   const [expandedMode, setExpandedMode] = useState<'deposit' | 'withdraw' | null>(null);
@@ -104,15 +105,15 @@ export function WalletPage() {
   useEffect(() => {
     if (!heldKey) { setPrices({}); return; }
     let cancelled = false;
-    const load = () => publicApi.getOraclePrices({ assets: heldKey, quote: 'usdt' })
+    const load = () => publicApi.getOraclePrices({ assets: heldKey, quote: displayCurrency })
       .then((p) => { if (!cancelled) setPrices(p || {}); })
       .catch(() => {});
     load();
     const id = setInterval(load, 30000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [heldKey]);
+  }, [heldKey, displayCurrency]);
 
-  const priceOf = (coin: string) => (coin === 'usdt' ? 1 : num(prices[coin]));
+  const priceOf = (coin: string) => (coin === displayCurrency ? 1 : num(prices[coin]));
   const totalValue = heldCoins.reduce((sum, c) => sum + num(balance?.[`${c}_balance`]) * priceOf(c), 0);
 
   // Whitelisted withdrawal addresses (HollaEx address book; local store in paper mode).
@@ -297,7 +298,7 @@ export function WalletPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
         <span className="text-sec">:: wallet_balances</span>
-        <span className="text-sec">est. value <span className="text-up" style={{ fontWeight: 'bold' }}>≈ {totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT</span></span>
+        <span className="text-sec">est. value <span className="text-up" style={{ fontWeight: 'bold' }}>≈ {totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} {CCY}</span></span>
       </div>
       <div className="divider" />
 
@@ -314,7 +315,7 @@ export function WalletPage() {
             <th>AVAILABLE</th>
             <th>IN_ORDER</th>
             <th>TOTAL</th>
-            <th>VALUE_USDT</th>
+            <th>VALUE_{CCY}</th>
             <th>ACTION</th>
           </tr>
         </thead>
