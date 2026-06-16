@@ -1,14 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { useExchange } from '../lib/ExchangeContext';
 import { userApi } from '../../api/endpoints/user';
 import { publicApi } from '../../api/endpoints/public';
 import { num } from '../../api/market';
 import { selectStyle } from '../lib/ui';
+import { safeStorage } from '../lib/storage';
 import { PortfolioPerformance } from '../components/PortfolioPerformance';
-import type { CoinConfig } from '../../api/types';
+import type { CoinConfig, AddressBookEntry } from '../../api/types';
 
 type TxTab = 'deposits' | 'withdrawals';
+
+const PAPER_AB_KEY = 'black_chart_paper_addressbook';
 
 const EVM_NETWORKS = ['eth', 'matic', 'bnb', 'bsc', 'arb', 'avax', 'base', 'op', 'optimism', 'ftm', 'pol'];
 
@@ -57,6 +60,7 @@ export function WalletPage() {
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const [txLoading, setTxLoading] = useState(false);
   const [prices, setPrices] = useState<Record<string, number>>({});
+  const [addressBook, setAddressBook] = useState<AddressBookEntry[]>([]);
 
   // Withdrawal form state
   const [wdlAddress, setWdlAddress] = useState('');
@@ -92,6 +96,47 @@ export function WalletPage() {
 
   const priceOf = (coin: string) => (coin === 'usdt' ? 1 : num(prices[coin]));
   const totalValue = heldCoins.reduce((sum, c) => sum + num(balance?.[`${c}_balance`]) * priceOf(c), 0);
+
+  // Whitelisted withdrawal addresses (HollaEx address book; local store in paper mode).
+  const loadAddressBook = useCallback(() => {
+    if (!isAuthenticated) return;
+    if (isPaper) {
+      try { setAddressBook(JSON.parse(safeStorage.get(PAPER_AB_KEY) || '[]')); } catch { setAddressBook([]); }
+      return;
+    }
+    userApi.getAddressBook()
+      .then((res: any) => setAddressBook(Array.isArray(res) ? res : (res?.data ?? res?.addresses ?? [])))
+      .catch(() => setAddressBook([]));
+  }, [isAuthenticated, isPaper]);
+
+  useEffect(() => { loadAddressBook(); }, [loadAddressBook]);
+
+  const coinAddresses = useMemo(
+    () => addressBook.filter((a) => a.address && (!a.currency || a.currency === expandedCoin)),
+    [addressBook, expandedCoin],
+  );
+
+  const saveAddress = async () => {
+    const addr = wdlAddress.trim();
+    if (!addr) { setWdlStatus('✗ enter an address to save'); return; }
+    if (!addressLooksValid(addr, wdlNetwork)) { setWdlStatus(`✗ address not valid for ${(wdlNetwork || expandedCoin || '').toUpperCase()}`); return; }
+    if (coinAddresses.some((a) => a.address === addr)) { setWdlStatus('✓ already in your address book'); return; }
+    const entry: AddressBookEntry = {
+      address: addr,
+      label: `${addr.slice(0, 8)}…${addr.slice(-6)}`,
+      currency: expandedCoin!,
+      network: wdlNetwork || undefined,
+    };
+    const next = [...addressBook, entry];
+    if (isPaper) {
+      safeStorage.set(PAPER_AB_KEY, JSON.stringify(next));
+      setAddressBook(next);
+      setWdlStatus('✓ saved to address book (paper)');
+    } else {
+      try { await userApi.updateAddressBook(next); loadAddressBook(); setWdlStatus('✓ saved to address book'); }
+      catch (err: any) { setWdlStatus(`✗ ${err?.message || 'could not save address'}`); }
+    }
+  };
 
   // CRITICAL: whenever the expanded coin/mode changes, fully reset BOTH forms so
   // no address/amount/otp/address from a previous coin can carry over (wrong-chain hazard).
@@ -347,6 +392,21 @@ export function WalletPage() {
                 {networkSelect(wdlNetwork, setWdlNetwork)}
               </>
             )}
+            {coinAddresses.length > 0 && (
+              <>
+                <span>saved</span>
+                <select
+                  defaultValue=""
+                  onChange={(e) => { const a = coinAddresses[Number(e.target.value)]; if (a) { setWdlAddress(a.address); if (a.network) setWdlNetwork(a.network); } }}
+                  style={selectStyle}
+                >
+                  <option value="">[choose whitelisted address]</option>
+                  {coinAddresses.map((a, i) => (
+                    <option key={i} value={i}>{(a.label || a.address)}{a.network ? ` · ${a.network.toUpperCase()}` : ''}</option>
+                  ))}
+                </select>
+              </>
+            )}
             <span>address</span>
             <input type="text" value={wdlAddress} onChange={(e) => setWdlAddress(e.target.value)} required placeholder="[destination_address]" />
             <span>amount</span>
@@ -354,6 +414,14 @@ export function WalletPage() {
             <span>otp_code{user?.otp_enabled ? ' *' : ''}</span>
             <input type="text" inputMode="numeric" maxLength={6} value={wdlOtp} onChange={(e) => setWdlOtp(e.target.value)} required={!!user?.otp_enabled} placeholder={user?.otp_enabled ? '[required — 2fa enabled]' : '[if 2fa enabled]'} />
           </div>
+
+          {wdlAddress.trim() && !coinAddresses.some((a) => a.address === wdlAddress.trim()) && (
+            <div style={{ fontSize: '11px' }}>
+              <span role="button" tabIndex={0} className="interact text-ter" onClick={saveAddress} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); saveAddress(); } }}>
+                [+ save address to whitelist]
+              </span>
+            </div>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11px' }}>
             <div className="text-sec">
