@@ -5,6 +5,7 @@ import { userApi } from '../../api/endpoints/user';
 import { publicApi } from '../../api/endpoints/public';
 import { num } from '../../api/market';
 import { selectStyle } from '../lib/ui';
+import { PortfolioPerformance } from '../components/PortfolioPerformance';
 import type { CoinConfig } from '../../api/types';
 
 type TxTab = 'deposits' | 'withdrawals';
@@ -371,6 +372,8 @@ export function WalletPage() {
           {wdlStatus && <div style={{ fontSize: '11px' }} className={wdlStatus.startsWith('✓') ? 'text-up' : wdlStatus.startsWith('✗') ? 'text-down' : 'text-sec'}>{wdlStatus}</div>}
         </form>
       )}
+
+      <PortfolioPerformance balance={balance} />
 
       <div style={{ marginTop: '40px' }} className="text-sec">:: transaction_history</div>
       <div className="divider" />
