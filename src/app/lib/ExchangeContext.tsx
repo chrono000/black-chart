@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { publicApi } from '../../api/endpoints/public';
+import { safeStorage } from './storage';
 import type { ExchangeConstants, KitConfig, Ticker } from '../../api/types';
 
 type ThemeMode = 'light' | 'dark';
@@ -28,9 +29,9 @@ export function ExchangeProvider({ children }: { children: ReactNode }) {
   const [tickers, setTickers] = useState<Record<string, Ticker>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [theme, setThemeState] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem(THEME_KEY) as ThemeMode | null;
+    const saved = safeStorage.get(THEME_KEY) as ThemeMode | null;
     if (saved) return saved;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch { return 'dark'; }
   });
 
   // Apply theme to DOM
@@ -41,7 +42,7 @@ export function ExchangeProvider({ children }: { children: ReactNode }) {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem(THEME_KEY, theme);
+    safeStorage.set(THEME_KEY, theme);
   }, [theme]);
 
   const setTheme = useCallback((mode: ThemeMode) => setThemeState(mode), []);

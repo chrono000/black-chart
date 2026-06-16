@@ -11,6 +11,7 @@ import {
   paperPlaceOrder, paperCancelOrder, paperFillCheck, paperConvert, paperDeposit, paperWithdraw,
   type PaperState, type PaperOrder, type PaperTx, type PaperTrade, type PaperOrderReq,
 } from './paper';
+import { safeStorage } from './storage';
 
 export interface PaperApi {
   orders: PaperOrder[];
@@ -47,6 +48,19 @@ const AuthContext = createContext<AuthState | null>(null);
 const TOKEN_KEY = 'hollaex_lite_token';
 const PAPER_MODE_KEY = 'black_chart_paper_mode';
 
+// Boot straight into paper trading when embedded/demoed: ?paper / ?embed / ?demo
+// in the URL, a paper-build (VITE_START_MODE=paper), or a prior paper session.
+// Lets an <iframe> land in a fully usable simulated exchange with no login.
+function shouldStartPaper(): boolean {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const truthy = (k: string) => { const v = p.get(k); return v !== null && v !== '0' && v !== 'false'; };
+    if (truthy('paper') || truthy('embed') || truthy('demo')) return true;
+  } catch { /* ignore */ }
+  if ((import.meta as any).env?.VITE_START_MODE === 'paper') return true;
+  return safeStorage.get(PAPER_MODE_KEY) === '1';
+}
+
 const PAPER_USER: User = {
   id: 0,
   email: 'paper@blackchart.local',
@@ -63,11 +77,11 @@ function isOtpRequired(err: any): boolean {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
+  const [token, setToken] = useState<string | null>(() => safeStorage.get(TOKEN_KEY));
   const [user, setUser] = useState<User | null>(null);
   const [balance, setBalance] = useState<UserBalance | null>(null);
-  const [isLoading, setIsLoading] = useState(!!localStorage.getItem(TOKEN_KEY));
-  const [isPaper, setIsPaper] = useState<boolean>(() => localStorage.getItem(PAPER_MODE_KEY) === '1');
+  const [isLoading, setIsLoading] = useState(!!safeStorage.get(TOKEN_KEY));
+  const [isPaper, setIsPaper] = useState<boolean>(() => shouldStartPaper());
 
   const [paperState, setPaperState] = useState<PaperState>(() => loadPaper());
   const paperRef = useRef(paperState);
@@ -90,10 +104,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (token) {
       configureApi({ token });
-      localStorage.setItem(TOKEN_KEY, token);
+      safeStorage.set(TOKEN_KEY, token);
     } else {
       clearAuth();
-      localStorage.removeItem(TOKEN_KEY);
+      safeStorage.remove(TOKEN_KEY);
     }
   }, [token]);
 
@@ -150,13 +164,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBalance(null);
     clearAuth();
     setIsPaper(true);
-    localStorage.setItem(PAPER_MODE_KEY, '1');
+    safeStorage.set(PAPER_MODE_KEY, '1');
   }, []);
 
   const logout = useCallback(() => {
     if (isPaper) {
       setIsPaper(false);
-      localStorage.removeItem(PAPER_MODE_KEY);
+      safeStorage.remove(PAPER_MODE_KEY);
       return; // paper balances persist for next time; nothing server-side to revoke
     }
     authApi.logout().catch(() => {});

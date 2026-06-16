@@ -70,6 +70,24 @@ A static `dist/` has **no Vite proxy**, so configure where the API lives via env
    VITE_WS_URL=wss://api.hollaex.com/stream
    ```
 
+## Embed in an iframe
+
+Black Chart can be embedded and booted straight into **paper trading**, so an
+embedded user can use every page (markets, trade, convert, wallet, performance)
+as if it were real — no login, no real funds:
+
+```html
+<iframe src="https://your-host/?paper=1" style="width:100%;height:800px;border:0"></iframe>
+```
+
+- `?paper=1` (also `?embed` or `?demo`) starts in paper mode on load. The banner
+  reads **SIMULATED · PAPER TRADING**. For a dedicated paper/demo build, set
+  `VITE_START_MODE=paper` instead of the query param.
+- All storage access is wrapped so a cross-origin iframe with blocked storage
+  degrades gracefully (no crash) — paper balances just reset per load.
+- Make sure your host does **not** send `X-Frame-Options: DENY` / a restrictive
+  `Content-Security-Policy: frame-ancestors`, or the frame will be blocked.
+
 ## Notes
 
 - This is a front-end only; no secrets are stored in the repo.
