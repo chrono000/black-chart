@@ -15,6 +15,7 @@ import {
   type Candle, type OrderbookSide, type PublicTrade, type MarketTicker,
 } from '../../api/market';
 import { orderApi } from '../../api/endpoints/order';
+import { userApi } from '../../api/endpoints/user';
 import { ws, type WsMessage } from '../../api/ws';
 import type { Order } from '../../api/types';
 
@@ -291,6 +292,9 @@ export function TradePage() {
       {/* Open Orders */}
       {isAuthenticated && <OpenOrders symbol={symbol} isPaper={isPaper} paper={paper} refreshSignal={ordersRefresh} onChange={() => { refreshBalance(); setOrdersRefresh((n) => n + 1); }} />}
 
+      {/* My Trades — the user's own recent fills for this pair */}
+      {isAuthenticated && <MyTrades symbol={symbol} isPaper={isPaper} paper={paper} refreshSignal={ordersRefresh} />}
+
       {/* Recent Trades */}
       <div style={{ marginTop: '20px' }}>
         <div className="text-sec" style={{ marginBottom: '10px' }}>[ recent_trades ]</div>
@@ -556,6 +560,66 @@ function OpenOrders({ symbol, isPaper, paper, refreshSignal, onChange }: { symbo
                 <td><span role="button" tabIndex={0} className="interact text-ter" onClick={() => cancel(o.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cancel(o.id); } }}>[cancel]</span></td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// The authenticated user's own recent fills for the current pair.
+// ─────────────────────────────────────────────────────────────
+function MyTrades({ symbol, isPaper, paper, refreshSignal }: { symbol: string; isPaper: boolean; paper: PaperApi | null; refreshSignal: number }) {
+  const [trades, setTrades] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    if (isPaper) { setTrades((paper?.trades || []).filter((t) => t.symbol === symbol)); return; }
+    setLoading(true);
+    userApi.getTrades({ symbol, limit: 20, order_by: 'timestamp', order: 'desc' })
+      .then((r) => setTrades(r.data || []))
+      .catch(() => setTrades([]))
+      .finally(() => setLoading(false));
+  }, [symbol, isPaper, paper]);
+
+  useEffect(() => { load(); }, [load, refreshSignal]);
+
+  // Poll so fills land without a manual refresh (live only; paper updates via state).
+  useEffect(() => {
+    if (isPaper) return;
+    const id = setInterval(load, 12000);
+    return () => clearInterval(id);
+  }, [load, isPaper]);
+
+  return (
+    <div style={{ marginTop: '20px' }}>
+      <div className="text-sec" style={{ marginBottom: '10px' }}>[ my_trades ]</div>
+      {loading && trades.length === 0 ? (
+        <div className="text-ter">loading your trades...</div>
+      ) : trades.length === 0 ? (
+        <div className="text-ter">no recent trades for {symbol.toUpperCase()}.</div>
+      ) : (
+        <table style={{ fontSize: '12px' }}>
+          <thead>
+            <tr><th>time</th><th>side</th><th>price</th><th>qty</th><th>total</th></tr>
+          </thead>
+          <tbody>
+            {trades.slice(0, 20).map((t, i) => {
+              const d = new Date(t.timestamp || t.created_at);
+              const timeStr = Number.isNaN(d.getTime()) ? '—' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+              const price = num(t.price);
+              const size = num(t.size);
+              return (
+                <tr key={i} className={t.side === 'sell' ? 'text-down' : 'text-up'}>
+                  <td>{timeStr}</td>
+                  <td>{t.side}</td>
+                  <td>{price.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                  <td>{size.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                  <td className="text-sec">{(price * size).toFixed(2)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
