@@ -15,17 +15,42 @@ const fmtDate = (ms: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// Fixed chart width so every timeframe fills the same area; series are resampled to it.
+const CHART_W = 78;
+
+function resampleLinear(arr: number[], n: number): number[] {
+  if (arr.length === 0) return [];
+  if (arr.length === 1) return Array(n).fill(arr[0]);
+  if (arr.length === n) return arr.slice();
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const pos = (i / (n - 1)) * (arr.length - 1);
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    const f = pos - lo;
+    out.push(arr[lo] * (1 - f) + arr[hi] * f);
+  }
+  return out;
+}
+
+function resampleNearest(arr: number[], n: number): number[] {
+  if (arr.length === 0) return [];
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push(arr[Math.round((i / Math.max(1, n - 1)) * (arr.length - 1))]);
+  return out;
+}
+
 // Wallet value over time — values current holdings against historical prices.
 export function PortfolioPerformance({ balance }: { balance: Record<string, number> | null }) {
   const [win, setWin] = useState<PerfWindow>('7d');
   const { values, times, loading, error } = usePortfolioHistory(balance, win);
 
-  const data = values.slice(-120);
-  const t = times.slice(-120);
-  const width = Math.max(24, data.length);
+  const hasData = values.length >= 2;
+  const data = hasData ? resampleLinear(values, CHART_W) : [];
+  const t = hasData ? resampleNearest(times, CHART_W) : [];
 
-  const first = data[0] ?? 0;
-  const last = data[data.length - 1] ?? 0;
+  const first = values[0] ?? 0;
+  const last = values[values.length - 1] ?? 0;
   const changePct = first > 0 ? ((last - first) / first) * 100 : 0;
 
   const xLabels = (() => {
@@ -66,14 +91,14 @@ export function PortfolioPerformance({ balance }: { balance: Record<string, numb
       </div>
       <div className="divider" />
       {loading ? (
-        <ChartSkeleton height={10} width={width} message="loading performance..." pulseMessage />
-      ) : error || data.length < 2 ? (
-        <ChartSkeleton height={10} width={Math.max(24, width)} message="no performance data for this period" />
+        <ChartSkeleton height={10} width={CHART_W} message="loading performance..." pulseMessage />
+      ) : error || !hasData ? (
+        <ChartSkeleton height={10} width={CHART_W} message="no performance data for this period" />
       ) : (
         <AsciiChart
           data={data}
           height={10}
-          width={width}
+          width={CHART_W}
           xLabels={xLabels}
           currentPrice={last}
           format={(n) => n.toLocaleString(undefined, { maximumFractionDigits: 0 })}

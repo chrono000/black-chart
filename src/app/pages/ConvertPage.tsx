@@ -23,6 +23,8 @@ export function ConvertPage() {
   const [quoting, setQuoting] = useState(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState<{ paid: number; from: string; received: number; to: string; approx: boolean } | null>(null);
 
   const fromAvail = num(balance?.[`${from}_available`]);
   const amtNum = parseFloat(amount);
@@ -32,6 +34,7 @@ export function ConvertPage() {
   useEffect(() => {
     setQuote(null);
     setStatus('');
+    setConfirming(false);
     if (!(amtNum > 0) || from === to) return;
     let cancelled = false;
     setQuoting(true);
@@ -68,31 +71,41 @@ export function ConvertPage() {
 
   const rate = quote && amtNum > 0 ? quote.receiving / amtNum : 0;
 
-  const doConvert = useCallback(async () => {
+  // Step 1: validate, then show the confirmation panel.
+  const startConvert = () => {
     if (!quote || !(amtNum > 0)) return;
     if (amtNum > fromAvail + 1e-9) { setStatus(`✗ insufficient ${from.toUpperCase()}`); return; }
+    setStatus('');
+    setConfirming(true);
+  };
+
+  // Step 2: execute the conversion and show the success result.
+  const doConvert = useCallback(async () => {
+    if (!quote || !(amtNum > 0)) return;
     setBusy(true);
     setStatus('converting...');
     try {
       if (isPaper) {
         paper!.convert(from, to, amtNum, quote.receiving);
-        setStatus(`✓ converted ${amtNum} ${from.toUpperCase()} → ${quote.receiving.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${to.toUpperCase()}`);
-        setAmount('');
       } else {
         if (!quote.token) throw new Error('quote not executable — adjust the amount to refresh');
         await orderApi.executeQuickTrade(quote.token);
-        setStatus(`✓ converted ~${amtNum} ${from.toUpperCase()} → ${to.toUpperCase()}`);
-        setAmount('');
         refreshBalance();
       }
+      setResult({ paid: amtNum, from, received: quote.receiving, to, approx: !isPaper });
+      setStatus('');
+      setConfirming(false);
+      setAmount('');
+      setQuote(null);
     } catch (err: any) {
       setStatus(`✗ ${err?.isTimeout ? 'timed out — check your balance before retrying' : err?.message || 'convert failed'}`);
+      setConfirming(false);
     } finally {
       setBusy(false);
     }
-  }, [quote, amtNum, fromAvail, isPaper, from, to, paper, refreshBalance]);
+  }, [quote, amtNum, isPaper, from, to, paper, refreshBalance]);
 
-  const swap = () => { setFrom(to); setTo(from); setAmount(''); setQuote(null); setStatus(''); };
+  const swap = () => { setFrom(to); setTo(from); setAmount(''); setQuote(null); setStatus(''); setConfirming(false); setResult(null); };
 
   const selectStyle = { ...baseSelect, padding: '4px 6px', minWidth: '110px' };
 
@@ -158,13 +171,34 @@ export function ConvertPage() {
             <Link to="/login" className="text-primary">[login]</Link> or use{' '}
             <Link to="/login" className="text-primary">[paper trading]</Link> to convert.
           </div>
+        ) : result ? (
+          <div style={{ padding: '12px', border: '1px dashed var(--brand-up)' }}>
+            <div className="text-up" style={{ fontWeight: 'bold', marginBottom: '6px' }}>✓ conversion {result.approx ? 'submitted' : 'complete'}</div>
+            <div className="text-sec" style={{ fontSize: '12px' }}>
+              {result.paid.toLocaleString(undefined, { maximumFractionDigits: 8 })} {result.from.toUpperCase()} → {result.approx ? '≈ ' : ''}{result.received.toLocaleString(undefined, { maximumFractionDigits: 8 })} {result.to.toUpperCase()}
+            </div>
+            {result.approx && <div className="text-ter" style={{ fontSize: '11px', marginTop: '4px' }}>final amount confirmed on settlement.</div>}
+            <button onClick={() => { setResult(null); setStatus(''); }} style={{ marginTop: '10px' }}>[convert again]</button>
+          </div>
+        ) : confirming ? (
+          <div style={{ padding: '12px', border: '1px dashed var(--brand-up)' }}>
+            <div style={{ marginBottom: '8px' }}>
+              confirm: <span className="text-up">{amtNum.toLocaleString(undefined, { maximumFractionDigits: 8 })} {from.toUpperCase()}</span>
+              {' → '}
+              <span className="text-up">≈ {quote ? quote.receiving.toLocaleString(undefined, { maximumFractionDigits: 8 }) : '—'} {to.toUpperCase()}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button disabled={busy} onClick={doConvert} style={{ flex: 1, borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}>{busy ? '[converting...]' : '[confirm →]'}</button>
+              <button disabled={busy} onClick={() => setConfirming(false)} className="text-ter">[cancel]</button>
+            </div>
+          </div>
         ) : (
           <button
-            disabled={busy || quoting || !quote || from === to || !(amtNum > 0)}
-            onClick={doConvert}
+            disabled={quoting || !quote || from === to || !(amtNum > 0)}
+            onClick={startConvert}
             style={{ width: '100%', borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}
           >
-            {busy ? '[converting...]' : `[convert ${from.toUpperCase()} → ${to.toUpperCase()}]`}
+            [convert {from.toUpperCase()} → {to.toUpperCase()}]
           </button>
         )}
 
