@@ -150,8 +150,10 @@ button:focus-visible,
 .pulse { animation: termPulse 1s ease-in-out infinite; }
 
 /* ── Responsive foundations (apply at all widths) ── */
-/* Never let the whole page scroll sideways; wide things scroll in their own box. */
-html, body { max-width: 100%; overflow-x: hidden; }
+/* Never let the whole page scroll sideways; wide things scroll in their own box.
+   Use `clip` (not `hidden`) so it doesn't create a scroll container that would
+   break `position: sticky` on the nav. */
+html, body { max-width: 100%; overflow-x: clip; }
 /* No control may exceed its container. */
 input, select, button, form { max-width: 100%; }
 /* The ASCII chart is monospace ch-based; let it scroll if it can't shrink to fit. */
@@ -185,10 +187,18 @@ input, select, button, form { max-width: 100%; }
     padding: 4px 6px;
     font-size: 11px;
   }
-  /* Nav wraps with tighter gaps. */
+  /* Nav wraps with tighter gaps, and pins to the top when scrolling so it
+     stays reachable on long pages. */
   nav {
     flex-wrap: wrap;
     gap: 8px 12px !important;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--bg-primary);
+    padding: 8px 0;
+    margin-bottom: 12px !important;
+    border-bottom: 1px solid var(--border-light);
   }
   /* Tighten oversized inline grid/section gaps. */
   .trade-grid { gap: 16px !important; }

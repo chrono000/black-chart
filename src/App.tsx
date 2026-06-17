@@ -66,33 +66,36 @@ function Layout() {
       >
         {bannerText}
       </div>
-      {/* Header / Nav */}
+      {/* Header */}
       <header>
         <div>black chart // hollaex</div>
         <div className="divider" />
-        <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 18px', marginBottom: '20px' }}>
-          {navItems.map(item => (
-            <Link 
-              key={item.path} 
-              to={item.path}
-              className={location.pathname === item.path ? '' : 'text-sec'}
-            >
-              [{item.label}]
-            </Link>
-          ))}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <EventsBell />
-            {!isAuthenticated ? (
-              <>
-                <Link to="/login" className="text-sec">[login]</Link>
-                <Link to="/signup" className="text-sec">[signup]</Link>
-              </>
-            ) : (
-              <span className="text-up" style={{ fontSize: '11px', alignSelf: 'center' }}>[authed]</span>
-            )}
-          </div>
-        </nav>
       </header>
+
+      {/* Nav — sticks to the top on mobile so it stays reachable when scrolling.
+          Lives outside <header> so its sticky containing block is the full page. */}
+      <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 18px', marginBottom: '20px' }}>
+        {navItems.map(item => (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={location.pathname === item.path ? '' : 'text-sec'}
+          >
+            [{item.label}]
+          </Link>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <EventsBell />
+          {!isAuthenticated ? (
+            <>
+              <Link to="/login" className="text-sec">[login]</Link>
+              <Link to="/signup" className="text-sec">[signup]</Link>
+            </>
+          ) : (
+            <span className="text-up" style={{ fontSize: '11px', alignSelf: 'center' }}>[authed]</span>
+          )}
+        </div>
+      </nav>
 
       {/* Main Content */}
       <main>
