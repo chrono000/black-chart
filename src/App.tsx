@@ -7,6 +7,7 @@ import { AccountPage } from './app/pages/AccountPage';
 import { LoginPage } from './app/pages/LoginPage';
 import { SignupPage } from './app/pages/SignupPage';
 import { PricesPage } from './app/pages/PricesPage';
+import { MarketsPage } from './app/pages/MarketsPage';
 import { ChartPage } from './app/pages/ChartPage';
 import { ConvertPage } from './app/pages/ConvertPage';
 import { EarnPage } from './app/pages/EarnPage';
@@ -43,6 +44,7 @@ function Layout() {
   const navItems = [
     { path: '/', label: 'home' },
     { path: '/prices', label: 'prices' },
+    { path: '/markets', label: 'markets' },
     { path: '/trade', label: 'trade' },
     { path: '/convert', label: 'convert' },
     { path: '/earn', label: 'earn' },
@@ -97,6 +99,7 @@ function Layout() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/prices" element={<PricesPage />} />
+          <Route path="/markets" element={<MarketsPage />} />
           <Route path="/trade" element={<TradePage />} />
           <Route path="/convert" element={<ConvertPage />} />
           <Route path="/earn" element={<EarnPage />} />

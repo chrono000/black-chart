@@ -82,7 +82,7 @@ export function CoinPage() {
       <div>
         <div className="text-sec">:: coin / {symbol.toUpperCase()}</div>
         <div className="divider" />
-        <div className="text-ter">unknown asset "{symbol.toUpperCase()}". <Link to="/prices" className="text-primary">[browse markets]</Link></div>
+        <div className="text-ter">unknown asset "{symbol.toUpperCase()}". <Link to="/prices" className="text-primary">[browse coins]</Link></div>
       </div>
     );
   }
@@ -101,7 +101,7 @@ export function CoinPage() {
       {/* HEADER */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
         <span className="text-sec">:: coin / {symbol.toUpperCase()}</span>
-        <Link to="/prices" className="text-primary" style={{ fontSize: '12px' }}>[all markets →]</Link>
+        <Link to="/markets" className="text-primary" style={{ fontSize: '12px' }}>[all markets →]</Link>
       </div>
       <div className="divider" />
 

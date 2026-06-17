@@ -120,7 +120,7 @@ export function HomePage() {
       {/* WATCHLIST */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="text-sec">[ watchlist ]</span>
-        <Link to="/prices" className="text-primary" style={{ fontSize: '12px' }}>[manage →]</Link>
+        <Link to="/markets" className="text-primary" style={{ fontSize: '12px' }}>[manage →]</Link>
       </div>
       <div className="divider" />
       {watchPairs.length > 0 ? (
@@ -149,14 +149,14 @@ export function HomePage() {
         </table>
       ) : (
         <div className="text-ter" style={{ marginBottom: '30px', fontSize: '12px' }}>
-          no markets yet — tap <span className="text-sec">☆</span> on the <Link to="/prices" className="text-primary">[prices]</Link> page to track markets here.
+          no markets yet — tap <span className="text-sec">☆</span> on the <Link to="/markets" className="text-primary">[markets]</Link> page to track markets here.
         </div>
       )}
 
       {/* TOP MARKETS */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="text-sec">[ top markets ]</span>
-        <Link to="/prices" className="text-primary" style={{ fontSize: '12px' }}>[all prices →]</Link>
+        <Link to="/markets" className="text-primary" style={{ fontSize: '12px' }}>[all markets →]</Link>
       </div>
       <div className="divider" />
       <table>
