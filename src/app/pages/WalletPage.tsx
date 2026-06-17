@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useAuth } from '../lib/AuthContext';
 import { useExchange } from '../lib/ExchangeContext';
@@ -265,21 +265,21 @@ export function WalletPage() {
   };
 
   // Deep-link from the coin hub: /wallet?coin=<sym>&action=deposit|withdraw.
+  // Re-runs on auth / constants / param changes (no permanent guard) so successive
+  // deep-links and post-login navigation both open the right panel.
   const [searchParams] = useSearchParams();
-  const deepLinkApplied = useRef(false);
   useEffect(() => {
-    if (deepLinkApplied.current) return;
+    if (!isAuthenticated) return;
     const coin = (searchParams.get('coin') || '').toLowerCase();
     const action = searchParams.get('action');
     if (!coin || (action !== 'deposit' && action !== 'withdraw')) return;
     const cfg = constants?.coins?.[coin];
     if (!cfg) return; // wait until constants load
-    deepLinkApplied.current = true;
     if (action === 'deposit' && cfg.allow_deposit === false) return;
     if (action === 'withdraw' && cfg.allow_withdrawal === false) return;
     setExpandedMode(action);
     setExpandedCoin(coin);
-  }, [constants, searchParams]);
+  }, [isAuthenticated, constants, searchParams]);
 
   if (!isAuthenticated) {
     return (

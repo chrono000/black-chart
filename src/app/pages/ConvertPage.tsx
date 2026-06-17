@@ -21,11 +21,15 @@ export function ConvertPage() {
   );
 
   // Deep-linkable from the coin hub: ?to=<coin> (buy) / ?from=<coin> (sell).
+  // Resolve a valid pair that never has from === to (e.g. ?to=usdt would collide).
   const [searchParams] = useSearchParams();
-  const initFrom = (searchParams.get('from') || '').toLowerCase();
-  const initTo = (searchParams.get('to') || '').toLowerCase();
-  const [from, setFrom] = useState(initFrom || 'usdt');
-  const [to, setTo] = useState(initTo || ((initFrom || 'usdt') === 'usdt' ? 'btc' : 'usdt'));
+  const wantFrom = (searchParams.get('from') || '').toLowerCase() || 'usdt';
+  const wantToRaw = (searchParams.get('to') || '').toLowerCase();
+  const wantTo = wantToRaw && wantToRaw !== wantFrom ? wantToRaw : (wantFrom === 'usdt' ? 'btc' : 'usdt');
+  const [from, setFrom] = useState(wantFrom);
+  const [to, setTo] = useState(wantTo);
+  // Re-sync when the user arrives via a new ?from/?to while already on this page.
+  useEffect(() => { setFrom(wantFrom); setTo(wantTo); }, [wantFrom, wantTo]);
   const [amount, setAmount] = useState('');
   const [quote, setQuote] = useState<{ receiving: number; token?: string; estimate: boolean } | null>(null);
   const [quoting, setQuoting] = useState(false);
@@ -63,8 +67,7 @@ export function ConvertPage() {
             const pf = num(px[from]);
             const pt = num(px[to]);
             if (pf > 0 && pt > 0) {
-              setQuote({ receiving: (amtNum * pf) / pt, token: undefined, estimate: true });
-              setQuoting(false);
+              if (!cancelled) { setQuote({ receiving: (amtNum * pf) / pt, token: undefined, estimate: true }); setQuoting(false); }
               return;
             }
           } catch { /* fall through */ }

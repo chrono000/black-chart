@@ -92,7 +92,9 @@ export function CoinPage() {
   const explorer = coin.meta && typeof coin.meta.explorer === 'string' ? coin.meta.explorer : '';
   const allowDep = coin.allow_deposit !== false;
   const allowWdl = coin.allow_withdrawal !== false;
-  const wdFees = coin.withdrawal_fees && typeof coin.withdrawal_fees === 'object' ? coin.withdrawal_fees : null;
+  const wdFeeEntries = coin.withdrawal_fees && typeof coin.withdrawal_fees === 'object'
+    ? Object.entries(coin.withdrawal_fees).filter(([, f]) => f && typeof f === 'object' && typeof (f as { value?: unknown }).value === 'number')
+    : [];
 
   return (
     <div>
@@ -183,8 +185,8 @@ export function CoinPage() {
         {coin.network && <Row label="network" value={coin.network + (coin.standard ? ` (${coin.standard})` : '')} />}
         <Row label="deposits" value={allowDep ? 'enabled' : 'disabled'} tone={allowDep ? 'up' : 'down'} />
         <Row label="withdrawals" value={allowWdl ? 'enabled' : 'disabled'} tone={allowWdl ? 'up' : 'down'} />
-        {wdFees
-          ? <Row label="withdrawal fee" value={Object.entries(wdFees).map(([net, f]) => `${num((f as { value: number }).value)} ${((f as { symbol?: string }).symbol || net).toUpperCase()}`).join(' · ')} />
+        {wdFeeEntries.length > 0
+          ? <Row label="withdrawal fee" value={wdFeeEntries.map(([net, f]) => `${num((f as { value: number }).value)} ${((f as { symbol?: string }).symbol || net).toUpperCase()}`).join(' · ')} />
           : (coin.withdrawal_fee != null ? <Row label="withdrawal fee" value={`${coin.withdrawal_fee} ${symbol.toUpperCase()}`} /> : null)}
         {typeof coin.market_cap === 'number' && coin.market_cap > 0 && <Row label="market cap" value={`${fmt(coin.market_cap, 0)} USD`} />}
         {coin.category ? <Row label="category" value={String(coin.category)} /> : null}
