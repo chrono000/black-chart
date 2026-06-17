@@ -101,7 +101,7 @@ export function PricesPage() {
             <th onClick={() => toggleSort('price')} style={{ cursor: 'pointer' }}>price (USD){ind('price')}</th>
             <th onClick={() => toggleSort('change')} style={{ cursor: 'pointer' }}>24h{ind('change')}</th>
             <th onClick={() => toggleSort('mcap')} style={{ cursor: 'pointer' }}>market cap{ind('mcap')}</th>
-            <th></th>
+            <th>trade</th>
           </tr>
         </thead>
         <tbody>
@@ -119,7 +119,11 @@ export function PricesPage() {
                   {chg === null ? '—' : `${up ? '▲' : '▼'} ${Math.abs(chg).toFixed(2)}%`}
                 </td>
                 <td className="text-sec">{compact(mcap)}</td>
-                <td><Link to={`/coin/${coin.symbol}`} className="text-primary">[info]</Link></td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <Link to={`/convert?to=${coin.symbol}`} className="text-up">[buy]</Link>{' '}
+                  <Link to={`/convert?from=${coin.symbol}`} className="text-down">[sell]</Link>{' '}
+                  <Link to={`/coin/${coin.symbol}`} className="text-ter">[info]</Link>
+                </td>
               </tr>
             );
           })}
