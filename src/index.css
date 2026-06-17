@@ -156,6 +156,8 @@ button:focus-visible,
 html, body { max-width: 100%; overflow-x: clip; }
 /* No control may exceed its container. */
 input, select, button, form { max-width: 100%; }
+/* Page-header search box: fixed on desktop, full-width on mobile (see media query). */
+.head-search { width: 150px; }
 /* The ASCII chart is monospace ch-based; let it scroll if it can't shrink to fit. */
 .ascii-chart { max-width: 100%; overflow-x: auto; }
 
@@ -185,8 +187,11 @@ input, select, button, form { max-width: 100%; }
   }
   th, td {
     padding: 4px 6px;
-    font-size: 11px;
+    font-size: 12px;
   }
+  /* Page headers stack so the search box gets its own full-width row. */
+  .page-head { flex-wrap: wrap; gap: 8px; }
+  .head-search { width: 100%; }
   /* Nav wraps with tighter gaps, and pins to the top when scrolling so it
      stays reachable on long pages. */
   nav {

@@ -81,14 +81,14 @@ export function PricesPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="page-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span className="text-sec">:: prices <span className="text-ter" style={{ fontSize: '11px' }}>(assets by market cap)</span></span>
         <input
           type="text"
           placeholder="[search coin]"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ width: '150px' }}
+          className="head-search"
         />
       </div>
       <div className="divider" />
