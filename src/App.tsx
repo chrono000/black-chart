@@ -67,10 +67,16 @@ function Layout() {
         {bannerText}
       </div>
       {/* Header */}
-      <header>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <div>black chart // hollaex</div>
-        <div className="divider" />
+        {!isAuthenticated && (
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <Link to="/login">[login]</Link>
+            <Link to="/signup" className="text-up">[signup]</Link>
+          </div>
+        )}
       </header>
+      <div className="divider" />
 
       {/* Nav — sticks to the top on mobile so it stays reachable when scrolling.
           Lives outside <header> so its sticky containing block is the full page. */}
