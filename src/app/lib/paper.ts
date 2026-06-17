@@ -11,6 +11,7 @@ export interface PaperOrder {
   side: 'buy' | 'sell';
   type: 'limit' | 'market';
   price?: number;
+  stop?: number;
   size: number;
   filled: number;
   status: string;
@@ -85,7 +86,7 @@ export function lockedFor(state: PaperState, coin: string): number {
   for (const o of state.orders) {
     const [b, q] = o.symbol.split('-');
     const remaining = o.size - o.filled;
-    if (o.side === 'buy' && q === coin && o.price) locked += o.price * remaining;
+    if (o.side === 'buy' && q === coin) locked += (o.price || o.stop || 0) * remaining;
     if (o.side === 'sell' && b === coin) locked += remaining;
   }
   return locked;
@@ -124,13 +125,28 @@ export interface PaperOrderReq {
   size: number;
   type: 'limit' | 'market';
   price?: number;
+  stop?: number;
 }
 
-// Place a simulated order. Market fills at marketPrice; a marketable limit
-// fills at its limit price; otherwise it rests as an open order (locks funds).
+// Place a simulated order. Market fills at marketPrice; a marketable limit fills
+// at its limit price; otherwise it rests. A stop order rests until the market
+// crosses the stop, then becomes a market fill / resting limit.
 export function paperPlaceOrder(state: PaperState, req: PaperOrderReq, marketPrice: number): PaperState {
   const s = clone(state);
   const [base, quote] = req.symbol.split('-');
+
+  if (req.stop && req.stop > 0) {
+    const triggered = marketPrice > 0 && ((req.side === 'buy' && marketPrice >= req.stop) || (req.side === 'sell' && marketPrice <= req.stop));
+    if (!triggered) {
+      const refPrice = req.type === 'limit' ? (req.price || req.stop) : req.stop;
+      if (req.side === 'buy' && refPrice * req.size > avail(s, quote) + EPS) throw new Error(`insufficient ${quote.toUpperCase()}`);
+      if (req.side === 'sell' && req.size > avail(s, base) + EPS) throw new Error(`insufficient ${base.toUpperCase()}`);
+      s.orders.unshift({ id: `p${s.seq}`, symbol: req.symbol, side: req.side, type: req.type, price: req.price, stop: req.stop, size: req.size, filled: 0, status: 'stop', created_at: new Date().toISOString() });
+      s.seq += 1;
+      return s;
+    }
+    // already triggered → fall through to immediate market/limit handling
+  }
 
   if (req.type === 'market') {
     if (!(marketPrice > 0)) throw new Error('no market price available');
@@ -164,23 +180,39 @@ export function paperCancelOrder(state: PaperState, id: string): PaperState {
   return s;
 }
 
-// Fill any resting limit orders for `symbol` whose price the market has crossed.
-// Returns a new state if anything filled, else null.
+// On each price tick: trigger stop orders the market has crossed (→ market fill,
+// or convert to a resting limit), then fill resting limits the market has crossed.
 export function paperFillCheck(state: PaperState, symbol: string, lastPrice: number): PaperState | null {
   if (!(lastPrice > 0)) return null;
-  const toFill = state.orders.filter((o) =>
-    o.symbol === symbol && o.price &&
+  const s = clone(state);
+  let changed = false;
+
+  // 1. Trigger stops.
+  for (const o of s.orders) {
+    if (o.symbol !== symbol || o.status !== 'stop' || !o.stop) continue;
+    const crossed = (o.side === 'buy' && lastPrice >= o.stop) || (o.side === 'sell' && lastPrice <= o.stop);
+    if (!crossed) continue;
+    if (o.type === 'market') {
+      recordFill(s, o.symbol, o.side, lastPrice, o.size - o.filled);
+      o.status = '__filled__';
+    } else {
+      o.status = 'new'; // becomes a resting limit; may fill below in the same pass
+      delete o.stop;
+    }
+    changed = true;
+  }
+  s.orders = s.orders.filter((o) => o.status !== '__filled__');
+
+  // 2. Fill resting limit orders the market has crossed.
+  const toFill = s.orders.filter((o) =>
+    o.symbol === symbol && o.status !== 'stop' && o.price &&
     ((o.side === 'buy' && lastPrice <= o.price) || (o.side === 'sell' && lastPrice >= o.price)),
   );
-  if (toFill.length === 0) return null;
-  const s = clone(state);
-  for (const o of toFill) {
-    const remaining = o.size - o.filled;
-    recordFill(s, o.symbol, o.side, o.price!, remaining);
-  }
+  for (const o of toFill) { recordFill(s, o.symbol, o.side, o.price!, o.size - o.filled); changed = true; }
   const filledIds = new Set(toFill.map((o) => o.id));
   s.orders = s.orders.filter((o) => !filledIds.has(o.id));
-  return s;
+
+  return changed ? s : null;
 }
 
 export function paperConvert(state: PaperState, from: string, to: string, fromAmt: number, toAmt: number): PaperState {

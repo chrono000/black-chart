@@ -119,7 +119,7 @@ export function TradePage() {
   const displayChange = open24h > 0 ? ((displayLast - open24h) / open24h) * 100 : 0;
 
   // Order placement routes through the paper engine in paper mode (no real API call).
-  const placeOrder = useCallback(async (req: { symbol: string; side: 'buy' | 'sell'; size: number; type: 'limit' | 'market'; price?: number }) => {
+  const placeOrder = useCallback(async (req: { symbol: string; side: 'buy' | 'sell'; size: number; type: 'limit' | 'market'; price?: number; stop?: number; meta?: { post_only?: boolean } }) => {
     if (isPaper && paperRef.current) { paperRef.current.placeOrder(req, displayLast); return; }
     await orderApi.createOrder(req);
   }, [isPaper, displayLast]);
@@ -345,49 +345,57 @@ interface OrderFormProps {
   lastPrice: number;
   bestAsk?: number;
   balance: Record<string, number> | null;
-  placeOrder: (req: { symbol: string; side: 'buy' | 'sell'; size: number; type: 'limit' | 'market'; price?: number }) => Promise<void>;
+  placeOrder: (req: { symbol: string; side: 'buy' | 'sell'; size: number; type: 'limit' | 'market'; price?: number; stop?: number; meta?: { post_only?: boolean } }) => Promise<void>;
   onPlaced: () => void;
 }
 
+type OrderKind = 'limit' | 'market' | 'stop_limit' | 'stop_market';
+const KIND_LABEL: Record<OrderKind, string> = { limit: 'limit', market: 'market', stop_limit: 'stop-limit', stop_market: 'stop-market' };
+
 function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance, placeOrder, onPlaced }: OrderFormProps) {
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
-  const [type, setType] = useState<'limit' | 'market'>('limit');
+  const [kind, setKind] = useState<OrderKind>('limit');
   const [price, setPrice] = useState('');
+  const [stop, setStop] = useState('');
   const [size, setSize] = useState('');
+  const [postOnly, setPostOnly] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const submittingRef = useRef(false);
 
+  const baseType: 'limit' | 'market' = kind === 'market' || kind === 'stop_market' ? 'market' : 'limit';
+  const isStop = kind === 'stop_limit' || kind === 'stop_market';
+  const needsPrice = baseType === 'limit';
+
   const quoteAvail = num(balance?.[`${quote}_available`]);
   const baseAvail = num(balance?.[`${base}_available`]);
 
-  const rawSize = parseFloat(size);
-  const rawPrice = type === 'market' ? lastPrice : parseFloat(price);
-
-  // Quantize to the pair's step sizes (floor size, round price to nearest tick).
-  const qSize = roundToStep(rawSize, pairInfo?.increment_size, 'floor');
-  const qPrice = type === 'limit' ? roundToStep(rawPrice, pairInfo?.increment_price, 'round') : rawPrice;
-  const estPrice = type === 'market' ? (side === 'buy' ? (bestAsk || lastPrice) : lastPrice) : qPrice;
-  const total = (Number.isFinite(estPrice) ? estPrice : 0) * (Number.isFinite(qSize) ? qSize : 0);
+  const qSize = roundToStep(parseFloat(size), pairInfo?.increment_size, 'floor');
+  const qPrice = needsPrice ? roundToStep(parseFloat(price), pairInfo?.increment_price, 'round') : (side === 'buy' ? (bestAsk || lastPrice) : lastPrice);
+  const qStop = isStop ? roundToStep(parseFloat(stop), pairInfo?.increment_price, 'round') : NaN;
+  // Reference price for cost: limit/stop-limit → limit; stop-market → trigger; market → est.
+  const costRef = needsPrice ? qPrice : isStop ? qStop : qPrice;
+  const total = (Number.isFinite(costRef) ? costRef : 0) * (Number.isFinite(qSize) ? qSize : 0);
 
   const validationError = useMemo(() => {
     if (!Number.isFinite(qSize) || qSize <= 0) return 'enter a valid size';
     if (typeof pairInfo?.min_size === 'number' && qSize < pairInfo.min_size) return `min size is ${pairInfo.min_size} ${base.toUpperCase()}`;
     if (typeof pairInfo?.max_size === 'number' && pairInfo.max_size > 0 && qSize > pairInfo.max_size) return `max size is ${pairInfo.max_size} ${base.toUpperCase()}`;
-    if (type === 'market' && !(lastPrice > 0)) return 'no market price yet — wait for data';
-    if (type === 'limit') {
+    if (baseType === 'market' && !(lastPrice > 0)) return 'no market price yet — wait for data';
+    if (needsPrice) {
       if (!Number.isFinite(qPrice) || qPrice <= 0) return 'enter a valid price';
       if (typeof pairInfo?.min_price === 'number' && qPrice < pairInfo.min_price) return `min price is ${pairInfo.min_price}`;
       if (typeof pairInfo?.max_price === 'number' && pairInfo.max_price > 0 && qPrice > pairInfo.max_price) return `max price is ${pairInfo.max_price}`;
     }
-    const pad = type === 'market' ? MARKET_FEE_PAD : 1;
+    if (isStop && (!Number.isFinite(qStop) || qStop <= 0)) return 'enter a stop (trigger) price';
+    const pad = baseType === 'market' ? MARKET_FEE_PAD : 1;
     if (side === 'buy' && total * pad > quoteAvail) return `insufficient ${quote.toUpperCase()} (need ~${(total * pad).toFixed(2)})`;
     if (side === 'sell' && qSize > baseAvail) return `insufficient ${base.toUpperCase()}`;
     return '';
-  }, [qSize, qPrice, type, side, total, quoteAvail, baseAvail, pairInfo, base, quote, lastPrice]);
+  }, [qSize, qPrice, qStop, baseType, isStop, needsPrice, side, total, quoteAvail, baseAvail, pairInfo, base, quote, lastPrice]);
 
-  const reset = () => { setPrice(''); setSize(''); setConfirming(false); };
+  const reset = () => { setPrice(''); setStop(''); setSize(''); setConfirming(false); };
 
   const submit = useCallback(async () => {
     if (submittingRef.current) return; // synchronous re-entrancy guard (sub-frame double-click)
@@ -399,10 +407,12 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
         symbol,
         side,
         size: qSize,
-        type,
-        ...(type === 'limit' ? { price: qPrice } : {}),
+        type: baseType,
+        ...(needsPrice ? { price: qPrice } : {}),
+        ...(isStop ? { stop: qStop } : {}),
+        ...(needsPrice && postOnly ? { meta: { post_only: true } } : {}),
       });
-      setStatus(`✓ ${side} order placed`);
+      setStatus(`✓ ${side} ${KIND_LABEL[kind]} order placed`);
       reset();
       onPlaced();
     } catch (err: any) {
@@ -412,7 +422,7 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
       setBusy(false);
       submittingRef.current = false;
     }
-  }, [symbol, side, qSize, type, qPrice, placeOrder, onPlaced]);
+  }, [symbol, side, qSize, baseType, needsPrice, isStop, qPrice, qStop, postOnly, kind, placeOrder, onPlaced]);
 
   const inputStyle = { width: '140px' } as const;
 
@@ -447,13 +457,22 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>type</span>
-        <select value={type} onChange={(e) => { setType(e.target.value as 'limit' | 'market'); setConfirming(false); }} style={selectStyle}>
+        <select value={kind} onChange={(e) => { setKind(e.target.value as OrderKind); setConfirming(false); }} style={selectStyle}>
           <option value="limit">limit</option>
           <option value="market">market</option>
+          <option value="stop_limit">stop-limit</option>
+          <option value="stop_market">stop-market</option>
         </select>
       </div>
 
-      {type === 'limit' && (
+      {isStop && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>trigger</span>
+          <input type="number" step="any" value={stop} onChange={(e) => { setStop(e.target.value); setConfirming(false); }} placeholder={`stop @ ${lastPrice || '0.00'}`} style={inputStyle} />
+        </div>
+      )}
+
+      {needsPrice && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>price</span>
           <input type="number" step="any" value={price} onChange={(e) => { setPrice(e.target.value); setConfirming(false); }} placeholder={lastPrice ? lastPrice.toString() : '0.00'} style={inputStyle} />
@@ -464,6 +483,13 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
         <span>amount</span>
         <input type="number" step="any" value={size} onChange={(e) => { setSize(e.target.value); setConfirming(false); }} placeholder={`0.00 ${base.toUpperCase()}`} style={inputStyle} />
       </div>
+
+      {needsPrice && (
+        <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '11px', cursor: 'pointer' }} className="text-ter">
+          <input type="checkbox" checked={postOnly} onChange={(e) => { setPostOnly(e.target.checked); setConfirming(false); }} />
+          post-only (maker only)
+        </label>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <span className="text-ter">≈ total</span>
@@ -478,13 +504,15 @@ function OrderForm({ symbol, base, quote, pairInfo, lastPrice, bestAsk, balance,
           onClick={() => { setStatus(''); setConfirming(true); }}
           style={{ marginTop: '6px', width: '100%', borderColor: side === 'buy' ? 'var(--brand-up)' : 'var(--brand-down)', color: side === 'buy' ? 'var(--brand-up)' : 'var(--brand-down)' }}
         >
-          [{side}_{type} {symbol.toUpperCase()}]
+          [{side}_{kind} {symbol.toUpperCase()}]
         </button>
       ) : (
         <div style={{ marginTop: '6px', padding: '10px', border: `1px dashed ${side === 'buy' ? 'var(--brand-up)' : 'var(--brand-down)'}` }}>
           <div style={{ marginBottom: '8px' }}>
             confirm: <span className={side === 'buy' ? 'text-up' : 'text-down'}>{side} {qSize} {base.toUpperCase()}</span>
-            {type === 'limit' ? ` @ ${qPrice} ${quote.toUpperCase()}` : ' @ market'}
+            {isStop ? ` stop @ ${qStop}` : ''}
+            {needsPrice ? ` @ ${qPrice} ${quote.toUpperCase()}` : (isStop ? ' → market' : ' @ market')}
+            {needsPrice && postOnly ? ' · post-only' : ''}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button disabled={busy} onClick={submit} style={{ flex: 1, borderColor: side === 'buy' ? 'var(--brand-up)' : 'var(--brand-down)', color: side === 'buy' ? 'var(--brand-up)' : 'var(--brand-down)' }}>
@@ -546,13 +574,14 @@ function OpenOrders({ symbol, isPaper, paper, refreshSignal, onChange }: { symbo
       ) : (
         <table style={{ fontSize: '12px' }}>
           <thead>
-            <tr><th>side</th><th>type</th><th>price</th><th>size</th><th>filled</th><th>status</th><th>action</th></tr>
+            <tr><th>side</th><th>type</th><th>trigger</th><th>price</th><th>size</th><th>filled</th><th>status</th><th>action</th></tr>
           </thead>
           <tbody>
             {orders.map((o) => (
               <tr key={o.id} className={o.side === 'sell' ? 'text-down' : 'text-up'}>
                 <td>{o.side}</td>
-                <td className="text-sec">{o.type}</td>
+                <td className="text-sec">{o.stop ? `stop-${o.type}` : o.type}</td>
+                <td className="text-sec">{o.stop ?? '—'}</td>
                 <td>{o.price ?? '—'}</td>
                 <td>{o.size}</td>
                 <td className="text-sec">{o.filled}</td>
