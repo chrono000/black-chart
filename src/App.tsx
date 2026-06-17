@@ -86,12 +86,7 @@ function Layout() {
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px', alignItems: 'center' }}>
           <EventsBell />
-          {!isAuthenticated ? (
-            <>
-              <Link to="/login" className="text-sec">[login]</Link>
-              <Link to="/signup" className="text-sec">[signup]</Link>
-            </>
-          ) : (
+          {isAuthenticated && (
             <span className="text-up" style={{ fontSize: '11px', alignSelf: 'center' }}>[authed]</span>
           )}
         </div>
