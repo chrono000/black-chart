@@ -4,10 +4,11 @@ import { useExchange } from '../lib/ExchangeContext';
 import { useAuth } from '../lib/AuthContext';
 import { num } from '../../api/market';
 import { publicApi } from '../../api/endpoints/public';
+import { WatchStar } from '../components/WatchStar';
 import type { Announcement } from '../../api/types';
 
 export function HomePage() {
-  const { tickers, constants } = useExchange();
+  const { tickers, constants, watchlist } = useExchange();
   const { user, isAuthenticated, isPaper, balance } = useAuth();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
@@ -21,6 +22,13 @@ export function HomePage() {
       .sort((a, b) => num(tickers[b.name]?.volume) - num(tickers[a.name]?.volume))
       .slice(0, 6),
   [constants, tickers]);
+
+  // Starred markets, in the order they were added.
+  const watchPairs = useMemo(() =>
+    watchlist
+      .map((name) => constants?.pairs?.[name])
+      .filter((p): p is NonNullable<typeof p> => !!p),
+  [watchlist, constants]);
 
   const holdings = useMemo(() => {
     if (!balance) return [] as { coin: string; amt: number }[];
@@ -109,6 +117,42 @@ export function HomePage() {
         </div>
       </div>
 
+      {/* WATCHLIST */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="text-sec">[ watchlist ]</span>
+        <Link to="/prices" className="text-primary" style={{ fontSize: '12px' }}>[manage →]</Link>
+      </div>
+      <div className="divider" />
+      {watchPairs.length > 0 ? (
+        <table style={{ marginBottom: '30px' }}>
+          <thead>
+            <tr><th aria-label="watch" style={{ width: '24px' }}></th><th>pair</th><th>last</th><th>24h</th><th>action</th></tr>
+          </thead>
+          <tbody>
+            {watchPairs.map((pair) => {
+              const t = tickers[pair.name];
+              const chg = changeOf(pair.name);
+              const up = (chg ?? 0) >= 0;
+              return (
+                <tr key={pair.name}>
+                  <td style={{ textAlign: 'center' }}><WatchStar pair={pair.name} /></td>
+                  <td>{pair.name.toUpperCase()}</td>
+                  <td>{num(t?.last).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                  <td className={chg === null ? 'text-ter' : up ? 'text-up' : 'text-down'}>
+                    {chg === null ? '—' : `${up ? '▲' : '▼'} ${Math.abs(chg).toFixed(2)}%`}
+                  </td>
+                  <td><Link to={`/trade?pair=${pair.name}`} className="text-primary">[trade]</Link></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <div className="text-ter" style={{ marginBottom: '30px', fontSize: '12px' }}>
+          no markets yet — tap <span className="text-sec">☆</span> on the <Link to="/prices" className="text-primary">[prices]</Link> page to track markets here.
+        </div>
+      )}
+
       {/* TOP MARKETS */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="text-sec">[ top markets ]</span>
@@ -117,7 +161,7 @@ export function HomePage() {
       <div className="divider" />
       <table>
         <thead>
-          <tr><th>pair</th><th>last</th><th>24h</th><th>volume</th><th>action</th></tr>
+          <tr><th aria-label="watch" style={{ width: '24px' }}></th><th>pair</th><th>last</th><th>24h</th><th>volume</th><th>action</th></tr>
         </thead>
         <tbody>
           {topPairs.map((pair) => {
@@ -126,6 +170,7 @@ export function HomePage() {
             const up = (chg ?? 0) >= 0;
             return (
               <tr key={pair.name}>
+                <td style={{ textAlign: 'center' }}><WatchStar pair={pair.name} /></td>
                 <td>{pair.name.toUpperCase()}</td>
                 <td>{num(t?.last).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                 <td className={chg === null ? 'text-ter' : up ? 'text-up' : 'text-down'}>
@@ -136,7 +181,7 @@ export function HomePage() {
               </tr>
             );
           })}
-          {topPairs.length === 0 && <tr><td colSpan={5} className="text-ter">loading markets...</td></tr>}
+          {topPairs.length === 0 && <tr><td colSpan={6} className="text-ter">loading markets...</td></tr>}
         </tbody>
       </table>
     </div>

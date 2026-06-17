@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useExchange } from '../lib/ExchangeContext';
 import { num } from '../../api/market';
 import { Link } from 'react-router';
+import { WatchStar } from '../components/WatchStar';
 
 type SortKey = 'pair' | 'price' | 'change' | 'volume';
 
@@ -59,6 +60,7 @@ export function PricesPage() {
       <table>
         <thead>
           <tr>
+            <th aria-label="watch" style={{ width: '24px' }}></th>
             <th onClick={() => toggleSort('pair')} style={{ cursor: 'pointer' }}>pair{sortInd('pair')}</th>
             <th onClick={() => toggleSort('price')} style={{ cursor: 'pointer' }}>price{sortInd('price')}</th>
             <th onClick={() => toggleSort('change')} style={{ cursor: 'pointer' }}>change{sortInd('change')}</th>
@@ -82,6 +84,7 @@ export function PricesPage() {
 
             return (
               <tr key={pair.name}>
+                <td style={{ textAlign: 'center' }}><WatchStar pair={pair.name} /></td>
                 <td>{pair.name.toUpperCase()}</td>
                 <td>{last.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                 <td className={hasChange ? colorClass : 'text-ter'}>

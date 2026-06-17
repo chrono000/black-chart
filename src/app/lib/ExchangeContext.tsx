@@ -17,6 +17,9 @@ interface ExchangeState {
   setTheme: (mode: ThemeMode) => void;
   displayCurrency: string;
   setDisplayCurrency: (ccy: string) => void;
+  watchlist: string[];
+  isWatched: (pair: string) => boolean;
+  toggleWatch: (pair: string) => void;
   isLoading: boolean;
   refreshTickers: () => Promise<void>;
 }
@@ -25,6 +28,7 @@ const ExchangeContext = createContext<ExchangeState | null>(null);
 
 const THEME_KEY = 'hollaex_lite_theme';
 const DISPLAY_CCY_KEY = 'black_chart_display_ccy';
+const WATCHLIST_KEY = 'black_chart_watchlist';
 
 export function ExchangeProvider({ children }: { children: ReactNode }) {
   const [constants, setConstants] = useState<ExchangeConstants | null>(null);
@@ -58,6 +62,21 @@ export function ExchangeProvider({ children }: { children: ReactNode }) {
     safeStorage.set(DISPLAY_CCY_KEY, c);
   }, []);
 
+  // Watchlist — starred markets (pair names), persisted locally so it works in
+  // viewer / paper / live alike. Surfaced on the Home dashboard.
+  const [watchlist, setWatchlist] = useState<string[]>(() => {
+    try { const raw = safeStorage.get(WATCHLIST_KEY); const arr = raw ? JSON.parse(raw) : []; return Array.isArray(arr) ? arr.map(String) : []; } catch { return []; }
+  });
+  const isWatched = useCallback((pair: string) => watchlist.includes(pair.toLowerCase()), [watchlist]);
+  const toggleWatch = useCallback((pair: string) => {
+    const p = pair.toLowerCase();
+    setWatchlist((prev) => {
+      const next = prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p];
+      safeStorage.set(WATCHLIST_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   // Load exchange config on mount
   useEffect(() => {
     Promise.all([
@@ -85,8 +104,9 @@ export function ExchangeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<ExchangeState>(() => ({
-    constants, kit, tickers, theme, toggleTheme, setTheme, displayCurrency, setDisplayCurrency, isLoading, refreshTickers,
-  }), [constants, kit, tickers, theme, toggleTheme, setTheme, displayCurrency, setDisplayCurrency, isLoading, refreshTickers]);
+    constants, kit, tickers, theme, toggleTheme, setTheme, displayCurrency, setDisplayCurrency,
+    watchlist, isWatched, toggleWatch, isLoading, refreshTickers,
+  }), [constants, kit, tickers, theme, toggleTheme, setTheme, displayCurrency, setDisplayCurrency, watchlist, isWatched, toggleWatch, isLoading, refreshTickers]);
 
   return <ExchangeContext.Provider value={value}>{children}</ExchangeContext.Provider>;
 }

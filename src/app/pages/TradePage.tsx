@@ -5,6 +5,7 @@ import { useAuth, type PaperApi } from '../lib/AuthContext';
 import { useDisplayPairs, useAllPairOptions } from '../lib/useDisplayPairs';
 import { chipProps, selectStyle } from '../lib/ui';
 import { SearchSelect } from '../components/SearchSelect';
+import { WatchStar } from '../components/WatchStar';
 import { AsciiChart } from '../components/AsciiChart';
 import { ChartSkeleton } from '../components/ChartSkeleton';
 import { RequireLoginBlock } from '../components/RequireLoginBlock';
@@ -150,7 +151,9 @@ export function TradePage() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span className="text-sec">:: terminal_{symbol}</span>
+        <span className="text-sec" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+          :: terminal_{symbol} <WatchStar pair={symbol} size="15px" />
+        </span>
         {displayLast > 0 && (
           <span>
             {displayLast.toLocaleString(undefined, { maximumFractionDigits: 8 })}{' '}
