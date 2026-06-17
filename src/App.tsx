@@ -9,6 +9,7 @@ import { SignupPage } from './app/pages/SignupPage';
 import { PricesPage } from './app/pages/PricesPage';
 import { ChartPage } from './app/pages/ChartPage';
 import { ConvertPage } from './app/pages/ConvertPage';
+import { EarnPage } from './app/pages/EarnPage';
 import { EventsPage } from './app/pages/EventsPage';
 import { useAuth } from './app/lib/AuthContext';
 import { useExchange } from './app/lib/ExchangeContext';
@@ -42,6 +43,7 @@ function Layout() {
     { path: '/prices', label: 'prices' },
     { path: '/trade', label: 'trade' },
     { path: '/convert', label: 'convert' },
+    { path: '/earn', label: 'earn' },
     { path: '/wallet', label: 'wallet' },
     { path: '/events', label: 'events' },
     { path: '/account', label: 'account' },
@@ -94,6 +96,7 @@ function Layout() {
           <Route path="/prices" element={<PricesPage />} />
           <Route path="/trade" element={<TradePage />} />
           <Route path="/convert" element={<ConvertPage />} />
+          <Route path="/earn" element={<EarnPage />} />
           <Route path="/wallet" element={<WalletPage />} />
           <Route path="/events" element={<EventsPage />} />
           <Route path="/account" element={<AccountPage />} />
