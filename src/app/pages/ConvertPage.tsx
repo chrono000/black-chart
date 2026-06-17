@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useExchange } from '../lib/ExchangeContext';
 import { useAuth } from '../lib/AuthContext';
 import { orderApi } from '../../api/endpoints/order';
@@ -20,8 +20,12 @@ export function ConvertPage() {
     [constants],
   );
 
-  const [from, setFrom] = useState('usdt');
-  const [to, setTo] = useState('btc');
+  // Deep-linkable from the coin hub: ?to=<coin> (buy) / ?from=<coin> (sell).
+  const [searchParams] = useSearchParams();
+  const initFrom = (searchParams.get('from') || '').toLowerCase();
+  const initTo = (searchParams.get('to') || '').toLowerCase();
+  const [from, setFrom] = useState(initFrom || 'usdt');
+  const [to, setTo] = useState(initTo || ((initFrom || 'usdt') === 'usdt' ? 'btc' : 'usdt'));
   const [amount, setAmount] = useState('');
   const [quote, setQuote] = useState<{ receiving: number; token?: string; estimate: boolean } | null>(null);
   const [quoting, setQuoting] = useState(false);

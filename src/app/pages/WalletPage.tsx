@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { useAuth } from '../lib/AuthContext';
 import { useExchange } from '../lib/ExchangeContext';
 import { userApi } from '../../api/endpoints/user';
@@ -263,6 +264,23 @@ export function WalletPage() {
     setExpandedCoin(first?.symbol || 'btc');
   };
 
+  // Deep-link from the coin hub: /wallet?coin=<sym>&action=deposit|withdraw.
+  const [searchParams] = useSearchParams();
+  const deepLinkApplied = useRef(false);
+  useEffect(() => {
+    if (deepLinkApplied.current) return;
+    const coin = (searchParams.get('coin') || '').toLowerCase();
+    const action = searchParams.get('action');
+    if (!coin || (action !== 'deposit' && action !== 'withdraw')) return;
+    const cfg = constants?.coins?.[coin];
+    if (!cfg) return; // wait until constants load
+    deepLinkApplied.current = true;
+    if (action === 'deposit' && cfg.allow_deposit === false) return;
+    if (action === 'withdraw' && cfg.allow_withdrawal === false) return;
+    setExpandedMode(action);
+    setExpandedCoin(coin);
+  }, [constants, searchParams]);
+
   if (!isAuthenticated) {
     return (
       <div>
@@ -333,7 +351,7 @@ export function WalletPage() {
 
             return (
               <tr key={coin.symbol} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <td style={{ padding: '8px 0' }}>{coin.symbol.toUpperCase()}</td>
+                <td style={{ padding: '8px 0' }}><Link to={`/coin/${coin.symbol}`} className="text-primary">{coin.symbol.toUpperCase()}</Link></td>
                 <td>{avail.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                 <td className="text-sec">{inOrder > 1e-9 ? inOrder.toLocaleString(undefined, { maximumFractionDigits: 8 }) : '-'}</td>
                 <td>{bal.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>

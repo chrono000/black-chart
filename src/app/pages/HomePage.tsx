@@ -72,7 +72,7 @@ export function HomePage() {
               <div className="text-ter" style={{ marginTop: '8px' }}>holdings:</div>
               {holdings.length > 0 ? holdings.slice(0, 5).map((h) => (
                 <div key={h.coin} style={{ display: 'flex', justifyContent: 'space-between', maxWidth: '240px' }}>
-                  <span>{h.coin.toUpperCase()}</span>
+                  <Link to={`/coin/${h.coin}`} className="text-primary">{h.coin.toUpperCase()}</Link>
                   <span className="text-sec">{h.amt.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span>
                 </div>
               )) : <div className="text-ter">no balances yet</div>}

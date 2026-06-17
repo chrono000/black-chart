@@ -10,6 +10,7 @@ import { PricesPage } from './app/pages/PricesPage';
 import { ChartPage } from './app/pages/ChartPage';
 import { ConvertPage } from './app/pages/ConvertPage';
 import { EarnPage } from './app/pages/EarnPage';
+import { CoinPage } from './app/pages/CoinPage';
 import { EventsPage } from './app/pages/EventsPage';
 import { EventsBell } from './app/components/EventsBell';
 import { useAuth } from './app/lib/AuthContext';
@@ -99,6 +100,7 @@ function Layout() {
           <Route path="/trade" element={<TradePage />} />
           <Route path="/convert" element={<ConvertPage />} />
           <Route path="/earn" element={<EarnPage />} />
+          <Route path="/coin/:symbol" element={<CoinPage />} />
           <Route path="/wallet" element={<WalletPage />} />
           <Route path="/events" element={<EventsPage />} />
           <Route path="/account" element={<AccountPage />} />

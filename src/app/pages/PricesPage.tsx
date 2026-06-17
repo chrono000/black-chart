@@ -85,7 +85,7 @@ export function PricesPage() {
             return (
               <tr key={pair.name}>
                 <td style={{ textAlign: 'center' }}><WatchStar pair={pair.name} /></td>
-                <td>{pair.name.toUpperCase()}</td>
+                <td><Link to={`/coin/${pair.pair_base}`} className="text-primary">{pair.name.toUpperCase()}</Link></td>
                 <td>{last.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                 <td className={hasChange ? colorClass : 'text-ter'}>
                   {hasChange ? changeStr : '—'}
