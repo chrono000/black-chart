@@ -1,55 +1,127 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../lib/AuthContext';
 import { stakeApi } from '../../api/endpoints/stake';
 import { num } from '../../api/market';
-import type { StakePool, Staker } from '../../api/types';
+import { PAPER_POOLS, paperStakeReward, paperStakeMatured } from '../lib/paper';
 
-const fmtAmt = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 8 });
-const fmtDuration = (d?: number) => (d && d > 0 ? `${d}d` : 'flexible');
+interface Pool {
+  id: number;
+  name: string;
+  currency: string;
+  reward_currency: string;
+  apy: number;
+  duration: number; // days; 0 = flexible
+  min_amount: number;
+  status: string;
+}
+
+interface MyStake {
+  id: number;
+  currency: string;
+  reward_currency: string;
+  amount: number;
+  reward: number;
+  apy: number;
+  duration: number;
+  created_at: string;
+  status: string;
+  matured: boolean;
+  canUnstake: boolean;
+}
+
+const fmtAmt = (v: number, d = 8) => v.toLocaleString(undefined, { maximumFractionDigits: d });
+const fmtLock = (d: number) => (d > 0 ? `${d}d lock` : 'flexible');
 const msgClass = (m: string) => (m.startsWith('✓') ? 'text-up' : m.startsWith('✗') ? 'text-down' : 'text-sec');
+const DAY_MS = 24 * 3600 * 1000;
+
+// Days remaining until a locked stake matures (0 if flexible / already matured).
+const daysLeft = (s: MyStake, now: number) => {
+  if (s.duration <= 0) return 0;
+  const end = new Date(s.created_at).getTime() + s.duration * DAY_MS;
+  return Math.max(0, Math.ceil((end - now) / DAY_MS));
+};
 
 export function EarnPage() {
-  const { isAuthenticated, isPaper, balance, refreshBalance } = useAuth();
+  const { isAuthenticated, isPaper, balance, paper, refreshBalance } = useAuth();
 
-  const [pools, setPools] = useState<StakePool[]>([]);
-  const [stakes, setStakes] = useState<Staker[]>([]);
+  const [livePools, setLivePools] = useState<Pool[]>([]);
+  const [liveStakes, setLiveStakes] = useState<MyStake[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
-  // staking form (one pool at a time)
-  const [openPool, setOpenPool] = useState<StakePool | null>(null);
+  // staking form
+  const [openPool, setOpenPool] = useState<Pool | null>(null);
   const [amount, setAmount] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const load = useCallback(() => {
-    if (!isAuthenticated || isPaper) { setLoading(false); return; }
+  // tick so paper rewards visibly accrue
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isPaper) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isPaper]);
+
+  const loadLive = useCallback(() => {
+    if (isPaper || !isAuthenticated) { setLoading(false); return; }
     setLoading(true);
     Promise.all([
       stakeApi.getStakes({ limit: 100 }).then((r) => r.data || []).catch(() => null),
       stakeApi.getStakers({ limit: 100, order_by: 'created_at', order: 'desc' }).then((r) => r.data || []).catch(() => []),
     ]).then(([p, s]) => {
-      if (p === null) { setErr('could not load staking pools — staking may be disabled on this exchange.'); setPools([]); }
-      else { setErr(''); setPools(p.filter((x) => x.status !== 'uninitialized')); }
-      setStakes(s);
+      if (p === null) { setErr('could not load staking pools — staking may be disabled on this exchange.'); setLivePools([]); }
+      else {
+        setErr('');
+        setLivePools(p.filter((x: any) => x.status !== 'uninitialized').map((x: any): Pool => ({
+          id: x.id, name: x.name, currency: x.currency, reward_currency: x.reward_currency || x.currency,
+          apy: num(x.apy), duration: num(x.duration), min_amount: num(x.min_amount), status: x.status,
+        })));
+      }
+      setLiveStakes((s as any[]).map((x): MyStake => {
+        const active = x.status === 'staking' || x.status === 'active' || x.status === 'unlocked';
+        return {
+          id: x.id, currency: x.currency, reward_currency: x.currency, amount: num(x.amount), reward: num(x.reward),
+          apy: 0, duration: 0, created_at: x.created_at, status: x.status, matured: x.status === 'unlocked', canUnstake: active,
+        };
+      }));
     }).finally(() => setLoading(false));
-  }, [isAuthenticated, isPaper]);
+  }, [isPaper, isAuthenticated]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadLive(); }, [loadLive]);
 
-  const beginStake = (pool: StakePool) => {
-    setOpenPool(pool); setAmount(''); setConfirming(false); setMsg('');
-  };
+  // Unified view model: paper uses the simulated pools/stakes, live uses the API,
+  // viewers see the paper pools as a representative preview.
+  const pools: Pool[] = useMemo(() => {
+    if (isPaper || !isAuthenticated) return PAPER_POOLS.map((p) => ({ ...p }));
+    return livePools;
+  }, [isPaper, isAuthenticated, livePools]);
+
+  const stakes: MyStake[] = useMemo(() => {
+    if (isPaper && paper) {
+      return paper.stakes.map((s): MyStake => ({
+        id: s.id, currency: s.currency, reward_currency: s.reward_currency, amount: s.amount,
+        reward: paperStakeReward(s, now), apy: s.apy, duration: s.duration, created_at: s.created_at,
+        status: s.status, matured: paperStakeMatured(s, now), canUnstake: true,
+      }));
+    }
+    return liveStakes;
+  }, [isPaper, paper, liveStakes, now]);
+
+  const canStake = isAuthenticated; // paper or live
+  const beginStake = (pool: Pool) => { setOpenPool(pool); setAmount(''); setConfirming(false); setMsg(''); };
 
   const amtNum = parseFloat(amount);
   const poolAvail = openPool ? num(balance?.[`${openPool.currency}_available`]) : 0;
+  const apy = openPool?.apy ?? 0;
+  const projAnnual = amtNum > 0 ? (amtNum * apy) / 100 : 0;
+  const projTerm = openPool && openPool.duration > 0 ? (projAnnual * openPool.duration) / 365 : null;
 
   const startConfirm = () => {
     if (!openPool || !(amtNum > 0)) return;
     if (openPool.min_amount && amtNum < openPool.min_amount) { setMsg(`✗ minimum is ${fmtAmt(openPool.min_amount)} ${openPool.currency.toUpperCase()}`); return; }
-    if (openPool.max_amount && amtNum > openPool.max_amount) { setMsg(`✗ maximum is ${fmtAmt(openPool.max_amount)} ${openPool.currency.toUpperCase()}`); return; }
     if (amtNum > poolAvail + 1e-9) { setMsg(`✗ insufficient ${openPool.currency.toUpperCase()}`); return; }
     setMsg(''); setConfirming(true);
   };
@@ -58,142 +130,154 @@ export function EarnPage() {
     if (!openPool || !(amtNum > 0)) return;
     setBusy(true); setMsg('staking...');
     try {
-      await stakeApi.createStaker({ stake_id: openPool.id, amount: amtNum });
-      setMsg('✓ stake submitted'); setOpenPool(null); setAmount(''); setConfirming(false);
-      refreshBalance(); load();
+      if (isPaper) paper!.stake(openPool.id, amtNum);
+      else { await stakeApi.createStaker({ stake_id: openPool.id, amount: amtNum }); refreshBalance(); loadLive(); }
+      setMsg('✓ staked'); setOpenPool(null); setAmount(''); setConfirming(false);
     } catch (e: any) {
       setMsg(`✗ ${e?.message || 'stake failed'}`); setConfirming(false);
     } finally { setBusy(false); }
   };
 
-  const unstake = async (s: Staker) => {
-    if (!window.confirm(`unstake ${fmtAmt(num(s.amount))} ${s.currency.toUpperCase()}? early unstaking may forfeit rewards.`)) return;
+  const unstake = async (s: MyStake) => {
+    const warn = s.duration > 0 && !s.matured ? ' early unstaking forfeits accrued rewards.' : '';
+    if (!window.confirm(`unstake ${fmtAmt(s.amount)} ${s.currency.toUpperCase()}?${warn}`)) return;
     setMsg('unstaking...');
     try {
-      await stakeApi.deleteStaker(s.id);
-      setMsg('✓ unstake requested'); refreshBalance(); load();
+      if (isPaper) paper!.unstake(s.id);
+      else { await stakeApi.deleteStaker(s.id); refreshBalance(); loadLive(); }
+      setMsg('✓ unstaked');
     } catch (e: any) { setMsg(`✗ ${e?.message || 'unstake failed'}`); }
   };
 
+  const totalStaked = stakes.filter((s) => s.canUnstake).length;
+  const card = { border: '1px solid var(--border-light)', padding: '14px 16px', minWidth: '190px', flex: '1 1 190px', maxWidth: '240px' } as const;
+
   return (
     <div>
-      <div className="text-sec">:: earn</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="text-sec">:: earn</span>
+        {canStake && totalStaked > 0 && <span className="text-ter" style={{ fontSize: '11px' }}>{totalStaked} active stake{totalStaked > 1 ? 's' : ''} · rewards accruing</span>}
+      </div>
       <div className="divider" />
 
-      {isPaper ? (
-        <div className="text-ter" style={{ fontSize: '12px', lineHeight: '1.7' }}>
-          staking runs against a real account — not available in paper trading.
-          <br />
-          <Link to="/login" className="text-primary">[log in]</Link> to stake real assets and earn rewards.
+      {!canStake && (
+        <div className="text-ter" style={{ fontSize: '12px', marginBottom: '18px', lineHeight: '1.7' }}>
+          stake your assets to earn rewards. <Link to="/login" className="text-primary">[login]</Link> or <Link to="/signup" className="text-primary">[signup]</Link> for live rates — or try it now in <Link to="/login" className="text-primary">[paper trading]</Link>. rates below are representative.
         </div>
-      ) : !isAuthenticated ? (
-        <div className="text-ter" style={{ fontSize: '12px', lineHeight: '1.7' }}>
-          stake your assets to earn rewards.
-          <br />
-          <Link to="/login" className="text-primary">[login]</Link> or <Link to="/signup" className="text-primary">[signup]</Link> to get started.
-        </div>
-      ) : loading ? (
-        <div className="text-ter">loading staking...</div>
-      ) : (
-        <>
-          {msg && <div style={{ fontSize: '11px', marginBottom: '12px' }} className={msgClass(msg)}>{msg}</div>}
+      )}
 
-          {/* YOUR STAKES */}
-          {stakes.length > 0 && (
-            <div style={{ marginBottom: '28px' }}>
-              <div className="text-sec" style={{ marginBottom: '8px' }}>[ your_stakes ]</div>
-              <table style={{ fontSize: '12px', width: '100%' }}>
-                <thead><tr><th>asset</th><th>amount</th><th>reward</th><th>status</th><th>since</th><th>action</th></tr></thead>
-                <tbody>
-                  {stakes.map((s) => {
-                    const active = s.status === 'staking' || s.status === 'active' || s.status === 'unlocked';
-                    return (
-                      <tr key={s.id}>
-                        <td>{s.currency?.toUpperCase()}</td>
-                        <td className="text-sec">{fmtAmt(num(s.amount))}</td>
-                        <td className="text-up">{num(s.reward) > 0 ? `+${fmtAmt(num(s.reward))}` : '—'}</td>
-                        <td className={active ? 'text-up' : 'text-ter'}>{s.status}</td>
-                        <td className="text-ter">{s.created_at ? new Date(s.created_at).toLocaleDateString() : '—'}</td>
-                        <td>{active
-                          ? <span role="button" tabIndex={0} className="interact text-down" onClick={() => unstake(s)} onKeyDown={(e) => { if (e.key === 'Enter') unstake(s); }}>[unstake]</span>
-                          : <span className="text-ter">—</span>}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+      {msg && <div style={{ fontSize: '11px', marginBottom: '12px' }} className={msgClass(msg)}>{msg}</div>}
 
-          {/* AVAILABLE POOLS */}
-          <div className="text-sec" style={{ marginBottom: '8px' }}>[ staking_pools ]</div>
-          {err ? (
-            <div className="text-ter" style={{ fontSize: '12px' }}>{err}</div>
-          ) : pools.length === 0 ? (
-            <div className="text-ter">no staking pools available right now.</div>
-          ) : (
-            <table style={{ fontSize: '12px', width: '100%' }}>
-              <thead><tr><th>pool</th><th>asset</th><th>est. apy</th><th>lock</th><th>min</th><th>action</th></tr></thead>
-              <tbody>
-                {pools.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.name}</td>
-                    <td className="text-sec">{p.currency?.toUpperCase()}{p.reward_currency && p.reward_currency !== p.currency ? ` → ${p.reward_currency.toUpperCase()}` : ''}</td>
-                    <td className="text-up">{p.apy != null ? `${num(p.apy).toFixed(2)}%` : '—'}</td>
-                    <td className="text-ter">{fmtDuration(p.duration)}{p.slashing ? ' · slashing' : ''}</td>
-                    <td className="text-ter">{p.min_amount ? fmtAmt(p.min_amount) : '—'}</td>
-                    <td>
-                      {p.status === 'active'
-                        ? <span role="button" tabIndex={0} className="interact text-primary" onClick={() => beginStake(p)} onKeyDown={(e) => { if (e.key === 'Enter') beginStake(p); }}>[stake]</span>
-                        : <span className="text-ter">{p.status}</span>}
+      {/* YOUR STAKES */}
+      {canStake && stakes.length > 0 && (
+        <div style={{ marginBottom: '28px' }}>
+          <div className="text-sec" style={{ marginBottom: '8px' }}>[ your_stakes ]</div>
+          <table style={{ fontSize: '12px', width: '100%' }}>
+            <thead><tr><th>asset</th><th>staked</th><th>reward</th><th>apy</th><th>status</th><th>action</th></tr></thead>
+            <tbody>
+              {stakes.map((s) => {
+                const left = daysLeft(s, now);
+                return (
+                  <tr key={s.id}>
+                    <td>{s.currency.toUpperCase()}</td>
+                    <td className="text-sec">{fmtAmt(s.amount)}</td>
+                    <td className="text-up">{s.reward > 0 ? `+${fmtAmt(s.reward)} ${s.reward_currency.toUpperCase()}` : '—'}</td>
+                    <td className="text-ter">{s.apy > 0 ? `${s.apy.toFixed(1)}%` : '—'}</td>
+                    <td className={s.canUnstake ? 'text-up' : 'text-ter'}>
+                      {s.duration > 0 && left > 0 && s.canUnstake ? `locked ${left}d` : s.status}
                     </td>
+                    <td>{s.canUnstake
+                      ? <span role="button" tabIndex={0} className="interact text-down" onClick={() => unstake(s)} onKeyDown={(e) => { if (e.key === 'Enter') unstake(s); }}>[unstake]</span>
+                      : <span className="text-ter">—</span>}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-          {/* STAKE FORM */}
-          {openPool && (
-            <div style={{ marginTop: '20px', padding: '14px', border: '1px dashed var(--brand-up)', maxWidth: '420px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <span className="text-sec">stake into {openPool.name}</span>
-                <span role="button" tabIndex={0} className="interact text-ter" onClick={() => { setOpenPool(null); setConfirming(false); }} onKeyDown={(e) => { if (e.key === 'Enter') { setOpenPool(null); setConfirming(false); } }}>[×]</span>
+      {/* EARN PRODUCTS */}
+      <div className="text-sec" style={{ marginBottom: '10px' }}>[ earn_products ]</div>
+      {loading ? (
+        <div className="text-ter">loading staking...</div>
+      ) : err ? (
+        <div className="text-ter" style={{ fontSize: '12px' }}>{err}</div>
+      ) : pools.length === 0 ? (
+        <div className="text-ter">no staking pools available right now.</div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+          {pools.map((p) => (
+            <div key={p.id} style={card}>
+              <div style={{ marginBottom: '6px' }}>{p.name}</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '8px' }}>
+                <span className="text-up" style={{ fontSize: '24px', fontWeight: 'bold' }}>{p.apy > 0 ? `${p.apy.toFixed(1)}%` : '—'}</span>
+                <span className="text-ter" style={{ fontSize: '10px' }}>est. apy</span>
               </div>
-              <div className="text-ter" style={{ fontSize: '11px', marginBottom: '6px' }}>
-                available: {fmtAmt(poolAvail)} {openPool.currency.toUpperCase()}
-                {poolAvail > 0 && (
-                  <span role="button" tabIndex={0} className="interact text-sec" style={{ marginLeft: '8px' }}
-                    onClick={() => setAmount(String(openPool.max_amount ? Math.min(poolAvail, openPool.max_amount) : poolAvail))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') setAmount(String(poolAvail)); }}>[max]</span>
-                )}
+              <div className="text-ter" style={{ fontSize: '11px', marginBottom: '10px' }}>
+                {p.currency.toUpperCase()}{p.reward_currency && p.reward_currency !== p.currency ? ` → ${p.reward_currency.toUpperCase()}` : ''} · {fmtLock(p.duration)}
+                {p.min_amount ? <><br />min {fmtAmt(p.min_amount)} {p.currency.toUpperCase()}</> : null}
               </div>
-              {!confirming ? (
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`0.00 ${openPool.currency.toUpperCase()}`} style={{ flex: 1 }} />
-                  <button disabled={!(amtNum > 0)} onClick={startConfirm} style={{ borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}>[stake]</button>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ marginBottom: '8px' }}>
-                    confirm: stake <span className="text-up">{fmtAmt(amtNum)} {openPool.currency.toUpperCase()}</span>
-                    {openPool.apy != null && <span className="text-ter"> · est. {num(openPool.apy).toFixed(2)}% apy</span>}
-                    {openPool.duration ? <span className="text-ter"> · locked {openPool.duration}d</span> : ''}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button disabled={busy} onClick={doStake} style={{ flex: 1, borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}>{busy ? '[staking...]' : '[confirm →]'}</button>
-                    <button disabled={busy} onClick={() => setConfirming(false)} className="text-ter">[cancel]</button>
-                  </div>
+              {p.status === 'active' ? (
+                canStake
+                  ? <button onClick={() => beginStake(p)} style={{ width: '100%', borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}>[stake]</button>
+                  : <Link to="/login" className="text-primary" style={{ fontSize: '12px' }}>[login to stake]</Link>
+              ) : <span className="text-ter" style={{ fontSize: '11px' }}>{p.status}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* STAKE PANEL */}
+      {openPool && canStake && (
+        <div style={{ marginTop: '20px', padding: '14px', border: '1px dashed var(--brand-up)', maxWidth: '440px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <span className="text-sec">stake · {openPool.name}</span>
+            <span role="button" tabIndex={0} className="interact text-ter" onClick={() => { setOpenPool(null); setConfirming(false); }} onKeyDown={(e) => { if (e.key === 'Enter') { setOpenPool(null); setConfirming(false); } }}>[×]</span>
+          </div>
+          <div className="text-ter" style={{ fontSize: '11px', marginBottom: '6px' }}>
+            available: {fmtAmt(poolAvail)} {openPool.currency.toUpperCase()}
+            {poolAvail > 0 && (
+              <span role="button" tabIndex={0} className="interact text-sec" style={{ marginLeft: '8px' }}
+                onClick={() => setAmount(String(poolAvail))}
+                onKeyDown={(e) => { if (e.key === 'Enter') setAmount(String(poolAvail)); }}>[max]</span>
+            )}
+          </div>
+          {!confirming ? (
+            <>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`0.00 ${openPool.currency.toUpperCase()}`} style={{ flex: 1 }} />
+                <button disabled={!(amtNum > 0)} onClick={startConfirm} style={{ borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}>[review]</button>
+              </div>
+              {amtNum > 0 && apy > 0 && (
+                <div className="text-ter" style={{ fontSize: '11px', marginTop: '8px', lineHeight: '1.6' }}>
+                  projected rewards @ {apy.toFixed(1)}%:<br />
+                  +{fmtAmt(projAnnual / 365)} /day · +{fmtAmt(projAnnual / 12)} /mo · +{fmtAmt(projAnnual)} /yr {openPool.reward_currency.toUpperCase()}
+                  {projTerm != null && <><br /><span className="text-sec">≈ +{fmtAmt(projTerm)} {openPool.reward_currency.toUpperCase()} over the {openPool.duration}d term</span></>}
                 </div>
               )}
+            </>
+          ) : (
+            <div>
+              <div style={{ marginBottom: '8px' }}>
+                confirm: stake <span className="text-up">{fmtAmt(amtNum)} {openPool.currency.toUpperCase()}</span>
+                <span className="text-ter"> · {fmtLock(openPool.duration)} · est. {apy.toFixed(1)}% apy</span>
+                {projTerm != null && <><br /><span className="text-ter" style={{ fontSize: '11px' }}>≈ +{fmtAmt(projTerm)} {openPool.reward_currency.toUpperCase()} at term</span></>}
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button disabled={busy} onClick={doStake} style={{ flex: 1, borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}>{busy ? '[staking...]' : '[confirm →]'}</button>
+                <button disabled={busy} onClick={() => setConfirming(false)} className="text-ter">[back]</button>
+              </div>
             </div>
           )}
-
-          <div className="text-ter" style={{ fontSize: '11px', marginTop: '18px' }}>
-            staking locks assets for a reward; APYs are estimates and rewards/penalties settle on HollaEx.
-          </div>
-        </>
+        </div>
       )}
+
+      <div className="text-ter" style={{ fontSize: '11px', marginTop: '18px' }}>
+        {isPaper
+          ? 'paper staking simulates locked funds and rewards accruing in real time — no real assets move.'
+          : 'staking locks assets for a reward; APYs are estimates and rewards/penalties settle on HollaEx.'}
+      </div>
     </div>
   );
 }

@@ -9,7 +9,8 @@ import type { User, UserBalance } from '../../api/types';
 import {
   loadPaper, savePaper, seedPaper, paperBalanceObject,
   paperPlaceOrder, paperCancelOrder, paperFillCheck, paperConvert, paperDeposit, paperWithdraw,
-  type PaperState, type PaperOrder, type PaperTx, type PaperTrade, type PaperOrderReq,
+  paperStake, paperUnstake,
+  type PaperState, type PaperOrder, type PaperTx, type PaperTrade, type PaperOrderReq, type PaperStake,
 } from './paper';
 import { safeStorage } from './storage';
 
@@ -18,12 +19,15 @@ export interface PaperApi {
   trades: PaperTrade[];
   deposits: PaperTx[];
   withdrawals: PaperTx[];
+  stakes: PaperStake[];
   placeOrder: (req: PaperOrderReq, marketPrice: number) => void;
   cancelOrder: (id: string) => void;
   fillCheck: (symbol: string, lastPrice: number) => void;
   convert: (from: string, to: string, fromAmt: number, toAmt: number) => void;
   deposit: (coin: string, amount: number, network?: string) => void;
   withdraw: (coin: string, amount: number, network?: string) => void;
+  stake: (poolId: number, amount: number) => void;
+  unstake: (id: number) => void;
   reset: () => void;
 }
 
@@ -197,12 +201,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       trades: paperState.trades,
       deposits: paperState.deposits,
       withdrawals: paperState.withdrawals,
+      stakes: paperState.stakes,
       placeOrder: (req, mp) => commitPaper(paperPlaceOrder(paperRef.current, req, mp)),
       cancelOrder: (id) => commitPaper(paperCancelOrder(paperRef.current, id)),
       fillCheck: (sym, lp) => { const n = paperFillCheck(paperRef.current, sym, lp); if (n) commitPaper(n); },
       convert: (f, t, fa, ta) => commitPaper(paperConvert(paperRef.current, f, t, fa, ta)),
       deposit: (c, a, n) => commitPaper(paperDeposit(paperRef.current, c, a, n)),
       withdraw: (c, a, n) => commitPaper(paperWithdraw(paperRef.current, c, a, n)),
+      stake: (poolId, a) => commitPaper(paperStake(paperRef.current, poolId, a)),
+      unstake: (id) => commitPaper(paperUnstake(paperRef.current, id)),
       reset: () => commitPaper(seedPaper()),
     };
   }, [isPaper, paperState, commitPaper]);

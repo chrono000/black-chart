@@ -36,14 +36,47 @@ export interface PaperTrade {
   timestamp: string;
 }
 
+export interface PaperStake {
+  id: number;
+  pool_id: number;
+  currency: string;
+  reward_currency: string;
+  amount: number;
+  apy: number;       // snapshot APY (%) at stake time
+  duration: number;  // lock in days; 0 = flexible
+  created_at: string;
+  status: string;    // 'staking'
+}
+
 export interface PaperState {
   totals: Record<string, number>;
   orders: PaperOrder[];
   trades: PaperTrade[];
   deposits: PaperTx[];
   withdrawals: PaperTx[];
+  stakes: PaperStake[];
   seq: number;
 }
+
+// Simulated earn products. Currencies match the seeded paper balances so a
+// demo user can actually stake. Shaped like a HollaEx StakePool.
+export interface PaperPool {
+  id: number;
+  name: string;
+  currency: string;
+  reward_currency: string;
+  apy: number;
+  duration: number; // days; 0 = flexible
+  min_amount: number;
+  status: string;
+}
+
+export const PAPER_POOLS: PaperPool[] = [
+  { id: 1, name: 'USDT Flexible Savings', currency: 'usdt', reward_currency: 'usdt', apy: 5.5, duration: 0, min_amount: 10, status: 'active' },
+  { id: 2, name: 'USDT Locked 30D', currency: 'usdt', reward_currency: 'usdt', apy: 9.2, duration: 30, min_amount: 50, status: 'active' },
+  { id: 3, name: 'ETH Staking 30D', currency: 'eth', reward_currency: 'eth', apy: 4.2, duration: 30, min_amount: 0.01, status: 'active' },
+  { id: 4, name: 'BTC Vault 90D', currency: 'btc', reward_currency: 'btc', apy: 3.1, duration: 90, min_amount: 0.001, status: 'active' },
+];
 
 const KEY = 'black_chart_paper_state';
 export const PAPER_FEE = 0.001; // 0.1% simulated taker fee
@@ -55,6 +88,7 @@ export function seedPaper(): PaperState {
     trades: [],
     deposits: [],
     withdrawals: [],
+    stakes: [],
     seq: 1,
   };
 }
@@ -243,5 +277,52 @@ export function paperWithdraw(state: PaperState, coin: string, amount: number, n
   s.totals[coin] = (s.totals[coin] || 0) - amount;
   s.withdrawals.unshift({ id: s.seq, currency: coin, amount, status: true, type: 'withdrawal', network, created_at: new Date().toISOString() });
   s.seq += 1;
+  return s;
+}
+
+// ── Staking / earn ──────────────────────────────────────────
+const YEAR_MS = 365 * 24 * 3600 * 1000;
+
+// Reward accrued so far on a stake. Locked stakes stop accruing at term end.
+export function paperStakeReward(stake: PaperStake, now: number = Date.now()): number {
+  const start = new Date(stake.created_at).getTime();
+  let elapsed = Math.max(0, now - start);
+  if (stake.duration > 0) elapsed = Math.min(elapsed, stake.duration * 24 * 3600 * 1000);
+  return stake.amount * (stake.apy / 100) * (elapsed / YEAR_MS);
+}
+
+// Flexible stakes are always withdrawable; locked stakes mature after `duration` days.
+export function paperStakeMatured(stake: PaperStake, now: number = Date.now()): boolean {
+  if (stake.duration <= 0) return true;
+  return now - new Date(stake.created_at).getTime() >= stake.duration * 24 * 3600 * 1000;
+}
+
+// Stake moves the principal out of the spot balance into the stake.
+export function paperStake(state: PaperState, poolId: number, amount: number): PaperState {
+  const s = clone(state);
+  const pool = PAPER_POOLS.find((p) => p.id === poolId);
+  if (!pool) throw new Error('unknown pool');
+  if (pool.status !== 'active') throw new Error('pool not active');
+  if (!(amount > 0)) throw new Error('invalid amount');
+  if (pool.min_amount && amount < pool.min_amount) throw new Error(`minimum ${pool.min_amount} ${pool.currency.toUpperCase()}`);
+  if (amount > avail(s, pool.currency) + EPS) throw new Error(`insufficient ${pool.currency.toUpperCase()}`);
+  s.totals[pool.currency] = (s.totals[pool.currency] || 0) - amount;
+  s.stakes.unshift({
+    id: s.seq, pool_id: pool.id, currency: pool.currency, reward_currency: pool.reward_currency,
+    amount, apy: pool.apy || 0, duration: pool.duration || 0, created_at: new Date().toISOString(), status: 'staking',
+  });
+  s.seq += 1;
+  return s;
+}
+
+// Unstake returns the principal; an early exit on a locked stake forfeits rewards.
+export function paperUnstake(state: PaperState, id: number): PaperState {
+  const s = clone(state);
+  const stake = s.stakes.find((x) => x.id === id);
+  if (!stake) throw new Error('stake not found');
+  const reward = paperStakeMatured(stake) ? paperStakeReward(stake) : 0;
+  s.totals[stake.currency] = (s.totals[stake.currency] || 0) + stake.amount;
+  if (reward > 0) s.totals[stake.reward_currency] = (s.totals[stake.reward_currency] || 0) + reward;
+  s.stakes = s.stakes.filter((x) => x.id !== id);
   return s;
 }
