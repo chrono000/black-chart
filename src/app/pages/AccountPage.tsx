@@ -92,7 +92,7 @@ export function AccountPage() {
       <div className="divider" />
 
       {tab === 'profile' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '30px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '30px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div>{label('id:')} {user?.id}</div>
             <div>{label('email:')} {user?.email}</div>

@@ -18,8 +18,8 @@ const fmtDate = (ms: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-// Fixed chart width so every timeframe fills the same area; series are resampled to it.
-const CHART_W = 78;
+// Chart width in columns — responsive so it fits a phone; series are resampled to it.
+const chartWidthFor = (w: number) => (w < 600 ? 44 : w < 900 ? 60 : 78);
 
 function resampleLinear(arr: number[], n: number): number[] {
   if (arr.length === 0) return [];
@@ -49,6 +49,14 @@ export function PortfolioPerformance({ balance }: { balance: Record<string, numb
   const [win, setWin] = useState<PerfWindow>('7d');
   const { values, times, loading, error } = usePortfolioHistory(balance, win);
 
+  // Fewer columns on a narrow screen so the chart fits without horizontal scroll.
+  const [chartW, setChartW] = useState(() => (typeof window !== 'undefined' ? chartWidthFor(window.innerWidth) : 78));
+  useEffect(() => {
+    const onResize = () => setChartW(chartWidthFor(window.innerWidth));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // The history is valued in USDT; scale by the current USDT→display-currency
   // rate so the chart matches the wallet's display-currency totals (no-op for usdt).
   const [fx, setFx] = useState(1);
@@ -64,8 +72,8 @@ export function PortfolioPerformance({ balance }: { balance: Record<string, numb
   const scaled = useMemo(() => values.map((v) => v * fx), [values, fx]);
 
   const hasData = scaled.length >= 2;
-  const data = hasData ? resampleLinear(scaled, CHART_W) : [];
-  const t = hasData ? resampleNearest(times, CHART_W) : [];
+  const data = hasData ? resampleLinear(scaled, chartW) : [];
+  const t = hasData ? resampleNearest(times, chartW) : [];
 
   const first = scaled[0] ?? 0;
   const last = scaled[scaled.length - 1] ?? 0;
@@ -109,14 +117,14 @@ export function PortfolioPerformance({ balance }: { balance: Record<string, numb
       </div>
       <div className="divider" />
       {loading ? (
-        <ChartSkeleton height={10} width={CHART_W} message="loading performance..." pulseMessage />
+        <ChartSkeleton height={10} width={chartW} message="loading performance..." pulseMessage />
       ) : error || !hasData ? (
-        <ChartSkeleton height={10} width={CHART_W} message="no performance data for this period" />
+        <ChartSkeleton height={10} width={chartW} message="no performance data for this period" />
       ) : (
         <AsciiChart
           data={data}
           height={10}
-          width={CHART_W}
+          width={chartW}
           xLabels={xLabels}
           currentPrice={last}
           format={(n) => n.toLocaleString(undefined, { maximumFractionDigits: 0 })}

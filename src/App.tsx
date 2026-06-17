@@ -67,7 +67,7 @@ function Layout() {
       <header>
         <div>black chart // hollaex</div>
         <div className="divider" />
-        <nav style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+        <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 18px', marginBottom: '20px' }}>
           {navItems.map(item => (
             <Link 
               key={item.path} 
@@ -110,7 +110,7 @@ function Layout() {
       {/* Footer */}
       <footer style={{ marginTop: '40px' }}>
         <div className="divider" />
-        <div className="text-ter" style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div className="text-ter footer-meta" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span>black chart</span>
           <span>api: <span style={{ color: 'var(--text-secondary)' }}>{host}/v2</span> · data: <span style={{ color: 'var(--text-secondary)' }}>hollaex</span> · auth: <span style={{ color: 'var(--text-secondary)' }}>bearer</span></span>
           <span>system: <span style={{ color: systemStatus === 'degraded' ? 'var(--brand-down)' : 'var(--text-secondary)' }}>{systemStatus}</span></span>

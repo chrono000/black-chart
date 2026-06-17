@@ -311,7 +311,7 @@ export function ChartPage() {
 
       {/* Orderbook + Trades — toggleable via M key */}
       {showMarketData && (
-        <div style={{ display: 'flex', gap: '40px', marginTop: '10px', overflow: 'hidden', maxHeight: '280px' }}>
+        <div className="chart-market-data" style={{ display: 'flex', gap: '40px', marginTop: '10px', overflow: 'hidden', maxHeight: '280px' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="text-sec" style={{ marginBottom: '6px' }}>[ orderbook_depth ]</div>
             {orderbook ? (

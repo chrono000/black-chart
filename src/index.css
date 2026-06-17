@@ -149,6 +149,14 @@ button:focus-visible,
 @keyframes termPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .pulse { animation: termPulse 1s ease-in-out infinite; }
 
+/* ── Responsive foundations (apply at all widths) ── */
+/* Never let the whole page scroll sideways; wide things scroll in their own box. */
+html, body { max-width: 100%; overflow-x: hidden; }
+/* No control may exceed its container. */
+input, select, button, form { max-width: 100%; }
+/* The ASCII chart is monospace ch-based; let it scroll if it can't shrink to fit. */
+.ascii-chart { max-width: 100%; overflow-x: auto; }
+
 /* Responsive Breakpoints */
 @media (max-width: 900px) {
   .container {
@@ -165,16 +173,34 @@ button:focus-visible,
 
 @media (max-width: 600px) {
   .container {
-    padding: 6px;
+    padding: 8px;
+  }
+  /* Wide tables scroll within their own box rather than truncating numbers. */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   th, td {
-    padding: 3px 2px;
+    padding: 4px 6px;
     font-size: 11px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 120px;
   }
+  /* Nav wraps with tighter gaps. */
   nav {
     flex-wrap: wrap;
+    gap: 8px 12px !important;
   }
+  /* Tighten oversized inline grid/section gaps. */
+  .trade-grid { gap: 16px !important; }
+  /* Shrink the chart so it fits a phone (cells are ch-based). */
+  .ascii-chart { font-size: 9px; }
+  /* Stack things that are side-by-side on desktop. */
+  .footer-meta { flex-direction: column !important; gap: 6px !important; }
+  .chart-market-data {
+    flex-direction: column !important;
+    gap: 20px !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .earn-card { flex-basis: 100% !important; max-width: none !important; }
 }

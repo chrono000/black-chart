@@ -226,7 +226,7 @@ export const AsciiChart = React.memo(function AsciiChart({
   });
 
   return (
-    <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: 'inherit', lineHeight: '1', letterSpacing: '0px' }}>
+    <pre className="ascii-chart" style={{ margin: 0, fontFamily: 'inherit', lineHeight: '1', letterSpacing: '0px' }}>
       <div 
         ref={containerRef}
         style={{ display: 'flex', flexDirection: 'column', position: 'relative', cursor: onZoom ? 'crosshair' : 'default', userSelect: 'none' }}

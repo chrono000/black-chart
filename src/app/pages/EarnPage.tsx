@@ -223,7 +223,7 @@ export function EarnPage() {
       ) : (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
           {pools.map((p) => (
-            <div key={p.id} style={card}>
+            <div key={p.id} className="earn-card" style={card}>
               <div style={{ marginBottom: '6px' }}>{p.name}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '8px' }}>
                 <span className="text-up" style={{ fontSize: '24px', fontWeight: 'bold' }}>{p.apy > 0 ? `${p.apy.toFixed(1)}%` : '—'}</span>
