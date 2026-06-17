@@ -158,6 +158,19 @@ html, body { max-width: 100%; overflow-x: clip; }
 input, select, button, form { max-width: 100%; }
 /* Page-header search box: fixed on desktop, full-width on mobile (see media query). */
 .head-search { width: 150px; }
+
+/* Pin the nav as a slim top bar on scroll (all viewports). The title/divider
+   above it live in <header> and scroll away, so only this compact row stays —
+   minimal screen use on desktop and tablet. */
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg-primary);
+  padding: 6px 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-light);
+}
 /* The ASCII chart is monospace ch-based; let it scroll if it can't shrink to fit. */
 .ascii-chart { max-width: 100%; overflow-x: auto; }
 
@@ -192,18 +205,12 @@ input, select, button, form { max-width: 100%; }
   /* Page headers stack so the search box gets its own full-width row. */
   .page-head { flex-wrap: wrap; gap: 8px; }
   .head-search { width: 100%; }
-  /* Nav wraps with tighter gaps, and pins to the top when scrolling so it
-     stays reachable on long pages. */
+  /* Nav (pinned via the base rule) just wraps with tighter gaps on mobile. */
   nav {
     flex-wrap: wrap;
     gap: 8px 12px !important;
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    background: var(--bg-primary);
     padding: 8px 0;
-    margin-bottom: 12px !important;
-    border-bottom: 1px solid var(--border-light);
+    margin-bottom: 12px;
   }
   /* Tighten oversized inline grid/section gaps. */
   .trade-grid { gap: 16px !important; }
