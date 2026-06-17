@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../lib/AuthContext';
+import { chipProps } from '../lib/ui';
 import { stakeApi } from '../../api/endpoints/stake';
 import { num } from '../../api/market';
 import { PAPER_POOLS, paperStakeReward, paperStakeMatured } from '../lib/paper';
@@ -72,19 +73,28 @@ export function EarnPage() {
       stakeApi.getStakes({ limit: 100 }).then((r) => r.data || []).catch(() => null),
       stakeApi.getStakers({ limit: 100, order_by: 'created_at', order: 'desc' }).then((r) => r.data || []).catch(() => []),
     ]).then(([p, s]) => {
+      let mapped: Pool[] = [];
       if (p === null) { setErr('could not load staking pools — staking may be disabled on this exchange.'); setLivePools([]); }
       else {
         setErr('');
-        setLivePools(p.filter((x: any) => x.status !== 'uninitialized').map((x: any): Pool => ({
+        mapped = p.filter((x: any) => x.status !== 'uninitialized').map((x: any): Pool => ({
           id: x.id, name: x.name, currency: x.currency, reward_currency: x.reward_currency || x.currency,
           apy: num(x.apy), duration: num(x.duration), min_amount: num(x.min_amount), status: x.status,
-        })));
+        }));
+        setLivePools(mapped);
       }
+      // Staker objects don't carry apy / duration / reward_currency — recover them
+      // from the matching pool via stake_id so the table shows correct terms.
+      const poolById = new Map(mapped.map((pp) => [pp.id, pp]));
       setLiveStakes((s as any[]).map((x): MyStake => {
+        const pool = poolById.get(x.stake_id);
         const active = x.status === 'staking' || x.status === 'active' || x.status === 'unlocked';
         return {
-          id: x.id, currency: x.currency, reward_currency: x.currency, amount: num(x.amount), reward: num(x.reward),
-          apy: 0, duration: 0, created_at: x.created_at, status: x.status, matured: x.status === 'unlocked', canUnstake: active,
+          id: x.id, currency: x.currency,
+          reward_currency: x.reward_currency || pool?.reward_currency || x.currency,
+          amount: num(x.amount), reward: num(x.reward),
+          apy: pool?.apy ?? 0, duration: pool?.duration ?? 0,
+          created_at: x.created_at, status: x.status, matured: x.status === 'unlocked', canUnstake: active,
         };
       }));
     }).finally(() => setLoading(false));
@@ -109,6 +119,11 @@ export function EarnPage() {
     }
     return liveStakes;
   }, [isPaper, paper, liveStakes, now]);
+
+  // If the open pool disappears after a live refresh, close the stale form.
+  useEffect(() => {
+    if (openPool && !pools.some((p) => p.id === openPool.id)) { setOpenPool(null); setConfirming(false); }
+  }, [pools, openPool]);
 
   const canStake = isAuthenticated; // paper or live
   const beginStake = (pool: Pool) => { setOpenPool(pool); setAmount(''); setConfirming(false); setMsg(''); };
@@ -187,7 +202,7 @@ export function EarnPage() {
                       {s.duration > 0 && left > 0 && s.canUnstake ? `locked ${left}d` : s.status}
                     </td>
                     <td>{s.canUnstake
-                      ? <span role="button" tabIndex={0} className="interact text-down" onClick={() => unstake(s)} onKeyDown={(e) => { if (e.key === 'Enter') unstake(s); }}>[unstake]</span>
+                      ? <span className="interact text-down" {...chipProps(() => unstake(s))}>[unstake]</span>
                       : <span className="text-ter">—</span>}</td>
                   </tr>
                 );
@@ -233,14 +248,12 @@ export function EarnPage() {
         <div style={{ marginTop: '20px', padding: '14px', border: '1px dashed var(--brand-up)', maxWidth: '440px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
             <span className="text-sec">stake · {openPool.name}</span>
-            <span role="button" tabIndex={0} className="interact text-ter" onClick={() => { setOpenPool(null); setConfirming(false); }} onKeyDown={(e) => { if (e.key === 'Enter') { setOpenPool(null); setConfirming(false); } }}>[×]</span>
+            <span className="interact text-ter" {...chipProps(() => { setOpenPool(null); setConfirming(false); })}>[×]</span>
           </div>
           <div className="text-ter" style={{ fontSize: '11px', marginBottom: '6px' }}>
             available: {fmtAmt(poolAvail)} {openPool.currency.toUpperCase()}
             {poolAvail > 0 && (
-              <span role="button" tabIndex={0} className="interact text-sec" style={{ marginLeft: '8px' }}
-                onClick={() => setAmount(String(poolAvail))}
-                onKeyDown={(e) => { if (e.key === 'Enter') setAmount(String(poolAvail)); }}>[max]</span>
+              <span className="interact text-sec" style={{ marginLeft: '8px' }} {...chipProps(() => setAmount(String(poolAvail)))}>[max]</span>
             )}
           </div>
           {!confirming ? (
