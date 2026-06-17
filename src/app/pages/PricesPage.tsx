@@ -31,15 +31,19 @@ export function PricesPage() {
   );
 
   // USD price for every asset (oracle), batched to keep the query string sane.
+  // Refreshed on an interval so the list stays live like the markets page.
   useEffect(() => {
     if (!coins.length) return;
     let cancelled = false;
     const syms = coins.map((c) => c.symbol);
     const chunks: string[][] = [];
     for (let i = 0; i < syms.length; i += 80) chunks.push(syms.slice(i, i + 80));
-    Promise.all(chunks.map((ch) => publicApi.getOraclePrices({ assets: ch.join(','), quote: 'usdt' }).catch(() => ({}))))
-      .then((parts) => { if (!cancelled) setPrices(Object.assign({}, ...parts)); });
-    return () => { cancelled = true; };
+    const fetchPrices = () =>
+      Promise.all(chunks.map((ch) => publicApi.getOraclePrices({ assets: ch.join(','), quote: 'usdt' }).catch(() => ({}))))
+        .then((parts) => { if (!cancelled) setPrices(Object.assign({}, ...parts)); });
+    fetchPrices();
+    const id = setInterval(fetchPrices, 60000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [coins]);
 
   // 24h change for an asset from its <coin>-usdt market (best-effort).
