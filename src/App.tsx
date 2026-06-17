@@ -74,7 +74,7 @@ function Layout() {
 
       {/* Nav — sticks to the top on mobile so it stays reachable when scrolling.
           Lives outside <header> so its sticky containing block is the full page. */}
-      <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 14px' }}>
+      <nav className={location.pathname === '/trade' ? 'nav-no-pin' : undefined} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 14px' }}>
         {navItems.map(item => (
           <Link
             key={item.path}

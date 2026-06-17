@@ -171,6 +171,8 @@ nav {
   margin-bottom: 16px;
   border-bottom: 1px solid var(--border-light);
 }
+/* Trade page opts out of the pinned bar so the dense trading UI stays in focus. */
+.nav-no-pin { position: static; }
 /* The ASCII chart is monospace ch-based; let it scroll if it can't shrink to fit. */
 .ascii-chart { max-width: 100%; overflow-x: auto; }
 
