@@ -11,6 +11,9 @@ export function SignupPage() {
   const [step, setStep] = useState<Step>('register');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [referral, setReferral] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('ref') || ''; } catch { return ''; }
+  });
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -21,7 +24,7 @@ export function SignupPage() {
     setLoading(true);
     setError('');
     try {
-      await signup(email, password, undefined, undefined);
+      await signup(email, password, referral.trim() || undefined, undefined);
       setStep('verify');
       setMessage('verification code sent to ' + email);
     } catch (err: any) {
@@ -87,6 +90,17 @@ export function SignupPage() {
               onChange={e => setPassword(e.target.value)} 
               placeholder="[____________]" 
               required
+              style={{ width: '200px' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>referral <span className="text-ter" style={{ fontSize: '11px' }}>(optional)</span></span>
+            <input
+              type="text"
+              value={referral}
+              onChange={e => setReferral(e.target.value)}
+              placeholder="[ code ]"
               style={{ width: '200px' }}
             />
           </div>

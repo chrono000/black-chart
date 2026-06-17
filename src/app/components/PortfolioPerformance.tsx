@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AsciiChart } from './AsciiChart';
 import { ChartSkeleton } from './ChartSkeleton';
 import { chipProps } from '../lib/ui';
+import { useExchange } from '../lib/ExchangeContext';
+import { publicApi } from '../../api/endpoints/public';
+import { num } from '../../api/market';
 import { usePortfolioHistory, type PerfWindow } from '../lib/usePortfolioHistory';
 
 const WINDOWS: { key: PerfWindow; label: string }[] = [
@@ -42,15 +45,30 @@ function resampleNearest(arr: number[], n: number): number[] {
 
 // Wallet value over time — values current holdings against historical prices.
 export function PortfolioPerformance({ balance }: { balance: Record<string, number> | null }) {
+  const { displayCurrency } = useExchange();
   const [win, setWin] = useState<PerfWindow>('7d');
   const { values, times, loading, error } = usePortfolioHistory(balance, win);
 
-  const hasData = values.length >= 2;
-  const data = hasData ? resampleLinear(values, CHART_W) : [];
+  // The history is valued in USDT; scale by the current USDT→display-currency
+  // rate so the chart matches the wallet's display-currency totals (no-op for usdt).
+  const [fx, setFx] = useState(1);
+  useEffect(() => {
+    if (displayCurrency === 'usdt') { setFx(1); return; }
+    let cancelled = false;
+    publicApi.getOraclePrices({ assets: 'usdt', quote: displayCurrency })
+      .then((p) => { if (!cancelled) { const r = num(p['usdt']); setFx(r > 0 ? r : 1); } })
+      .catch(() => { if (!cancelled) setFx(1); });
+    return () => { cancelled = true; };
+  }, [displayCurrency]);
+
+  const scaled = useMemo(() => values.map((v) => v * fx), [values, fx]);
+
+  const hasData = scaled.length >= 2;
+  const data = hasData ? resampleLinear(scaled, CHART_W) : [];
   const t = hasData ? resampleNearest(times, CHART_W) : [];
 
-  const first = values[0] ?? 0;
-  const last = values[values.length - 1] ?? 0;
+  const first = scaled[0] ?? 0;
+  const last = scaled[scaled.length - 1] ?? 0;
   const changePct = first > 0 ? ((last - first) / first) * 100 : 0;
 
   const xLabels = (() => {
@@ -62,7 +80,7 @@ export function PortfolioPerformance({ balance }: { balance: Record<string, numb
   return (
     <div style={{ marginTop: '40px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
-        <span className="text-sec">:: performance <span className="text-ter">(current holdings · usdt)</span></span>
+        <span className="text-sec">:: performance <span className="text-ter">(current holdings · {displayCurrency})</span></span>
         <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
           {data.length > 1 && (
             <span className={changePct >= 0 ? 'text-up' : 'text-down'}>

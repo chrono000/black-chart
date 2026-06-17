@@ -11,6 +11,7 @@ import { ChartPage } from './app/pages/ChartPage';
 import { ConvertPage } from './app/pages/ConvertPage';
 import { EarnPage } from './app/pages/EarnPage';
 import { EventsPage } from './app/pages/EventsPage';
+import { EventsBell } from './app/components/EventsBell';
 import { useAuth } from './app/lib/AuthContext';
 import { useExchange } from './app/lib/ExchangeContext';
 
@@ -76,7 +77,8 @@ function Layout() {
               [{item.label}]
             </Link>
           ))}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <EventsBell />
             {!isAuthenticated ? (
               <>
                 <Link to="/login" className="text-sec">[login]</Link>
