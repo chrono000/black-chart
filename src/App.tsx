@@ -31,14 +31,14 @@ function resolveApi(): { host: string; isSandbox: boolean } {
 function Layout() {
   const location = useLocation();
 
-  const { isAuthenticated, isPaper } = useAuth();
+  const { isAuthenticated, isPaper, logout } = useAuth();
   const { constants, isLoading } = useExchange();
   const { host, isSandbox } = resolveApi();
   const systemStatus = isLoading ? 'connecting' : constants ? 'operational' : 'degraded';
 
   const bannerBg = isPaper ? '#2563eb' : isSandbox ? '#d6a700' : 'var(--brand-down)';
   const bannerText = isPaper
-    ? 'SIMULATED · PAPER TRADING'
+    ? null
     : `${isSandbox ? 'SANDBOX · TEST FUNDS' : 'LIVE · REAL FUNDS'} · ${host}`;
 
   const navItems = [
@@ -58,13 +58,28 @@ function Layout() {
       {/* Environment banner — make real-money vs test unmistakable */}
       <div
         style={{
-          textAlign: 'center', padding: '3px 0', marginBottom: '10px',
+          display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px',
+          padding: '3px 8px', marginBottom: '10px',
           fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px',
           color: isPaper ? '#fff' : 'var(--bg-primary)',
           backgroundColor: bannerBg,
         }}
       >
-        {bannerText}
+        {isPaper ? (
+          <>
+            <span>SIMULATED · PAPER TRADING</span>
+            <button
+              onClick={logout}
+              style={{
+                background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.5)',
+                color: '#fff', fontSize: '10px', padding: '1px 6px', cursor: 'pointer',
+                fontWeight: 'normal', letterSpacing: '0.5px',
+              }}
+            >
+              switch to live
+            </button>
+          </>
+        ) : bannerText}
       </div>
       {/* Header */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
