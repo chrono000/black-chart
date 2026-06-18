@@ -31,7 +31,7 @@ function resolveApi(): { host: string; isSandbox: boolean } {
 function Layout() {
   const location = useLocation();
 
-  const { isAuthenticated, isPaper, logout } = useAuth();
+  const { isAuthenticated, isPaper, logout, paperLogin } = useAuth();
   const { constants, isLoading } = useExchange();
   const { host, isSandbox } = resolveApi();
   const systemStatus = isLoading ? 'connecting' : constants ? 'operational' : 'degraded';
@@ -79,7 +79,21 @@ function Layout() {
               switch to live
             </button>
           </>
-        ) : bannerText}
+        ) : (
+          <>
+            <span>{bannerText}</span>
+            <button
+              onClick={paperLogin}
+              style={{
+                background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(0,0,0,0.4)',
+                color: 'var(--bg-primary)', fontSize: '10px', padding: '1px 6px', cursor: 'pointer',
+                fontWeight: 'normal', letterSpacing: '0.5px',
+              }}
+            >
+              switch to simulated
+            </button>
+          </>
+        )}
       </div>
       {/* Header */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
