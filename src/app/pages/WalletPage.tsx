@@ -49,6 +49,10 @@ const feeFor = (coin: CoinConfig | undefined | null, network: string): number | 
   return null;
 };
 
+// Basic client-side email sanity for internal (email) transfers. The real
+// recipient is only verified by the server at the confirm step (USER_NOT_FOUND).
+const isValidEmail = (s: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());
+
 // Defense-in-depth: block an obvious wrong-chain address for well-known networks.
 // Lenient (allow) for networks we don't recognize, to avoid blocking valid withdrawals.
 const addressLooksValid = (address: string, network: string): boolean => {
@@ -82,7 +86,9 @@ export function WalletPage() {
   const [addressBook, setAddressBook] = useState<AddressBookEntry[]>([]);
 
   // Withdrawal form state
+  const [wdlDest, setWdlDest] = useState<'address' | 'email'>('address'); // crypto address vs internal email transfer
   const [wdlAddress, setWdlAddress] = useState('');
+  const [wdlEmail, setWdlEmail] = useState(''); // recipient email when wdlDest === 'email'
   const [wdlAmount, setWdlAmount] = useState('');
   const [wdlOtp, setWdlOtp] = useState('');
   const [wdlNetwork, setWdlNetwork] = useState('');
@@ -170,7 +176,9 @@ export function WalletPage() {
   // CRITICAL: whenever the expanded coin/mode changes, fully reset BOTH forms so
   // no address/amount/otp/address from a previous coin can carry over (wrong-chain hazard).
   useEffect(() => {
+    setWdlDest('address');
     setWdlAddress('');
+    setWdlEmail('');
     setWdlAmount('');
     setWdlOtp('');
     setWdlStatus('');
@@ -200,21 +208,47 @@ export function WalletPage() {
 
   useEffect(() => { fetchHistory(); /* eslint-disable-next-line */ }, [isAuthenticated, txTab]);
 
+  // Switch withdrawal destination, clearing fields so nothing carries across modes.
+  const switchDest = (d: 'address' | 'email') => {
+    setWdlDest(d);
+    setWdlAddress('');
+    setWdlEmail('');
+    setSavedIdx('');
+    setWdlStatus('');
+  };
+
   const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(wdlAmount);
     const avail = num(balance?.[`${expandedCoin}_available`]);
-    const fee = feeFor(expandedCoinConfig, wdlNetwork);
-    if (expandedNetworks.length > 1 && !wdlNetwork) { setWdlStatus('✗ select a network first'); return; }
-    if (!addressLooksValid(wdlAddress, wdlNetwork)) { setWdlStatus(`✗ address does not look valid for the ${(wdlNetwork || expandedCoin || '').toUpperCase()} network`); return; }
     if (!Number.isFinite(amt) || amt <= 0) { setWdlStatus('✗ enter a valid amount'); return; }
     if (amt > avail) { setWdlStatus('✗ insufficient available balance'); return; }
-    if (fee !== null && amt <= fee) { setWdlStatus(`✗ amount must exceed the network fee (${fee} ${expandedCoin!.toUpperCase()})`); return; }
+
+    // Build the withdrawal target. Two destinations share the same endpoint:
+    //  · crypto address — on-chain, validated by network + has a network fee
+    //  · email          — internal transfer (network:'email', recipient email in `address`), no fee
+    type WdlBody = { address: string; amount: number; currency: string; otp_code?: string; network?: string; method?: string };
+    let body: WdlBody;
+    let paperNetwork: string | undefined;
+    if (wdlDest === 'email') {
+      const email = wdlEmail.trim().toLowerCase();
+      if (!isValidEmail(email)) { setWdlStatus('✗ enter a valid recipient email'); return; }
+      body = { address: email, amount: amt, currency: expandedCoin!, network: 'email', method: 'email' };
+      paperNetwork = 'email';
+    } else {
+      const fee = feeFor(expandedCoinConfig, wdlNetwork);
+      if (expandedNetworks.length > 1 && !wdlNetwork) { setWdlStatus('✗ select a network first'); return; }
+      if (!addressLooksValid(wdlAddress, wdlNetwork)) { setWdlStatus(`✗ address does not look valid for the ${(wdlNetwork || expandedCoin || '').toUpperCase()} network`); return; }
+      if (fee !== null && amt <= fee) { setWdlStatus(`✗ amount must exceed the network fee (${fee} ${expandedCoin!.toUpperCase()})`); return; }
+      body = { address: wdlAddress.trim(), amount: amt, currency: expandedCoin!, network: wdlNetwork || undefined };
+      paperNetwork = wdlNetwork || undefined;
+    }
+
     if (isPaper && paper) {
       try {
-        paper.withdraw(expandedCoin!, amt, wdlNetwork || undefined);
-        setWdlStatus('✓ withdrawal simulated (paper)');
-        setWdlAddress(''); setWdlAmount(''); setWdlOtp('');
+        paper.withdraw(expandedCoin!, amt, paperNetwork);
+        setWdlStatus(wdlDest === 'email' ? `✓ sent to ${body.address} (paper)` : '✓ withdrawal simulated (paper)');
+        setWdlAddress(''); setWdlEmail(''); setWdlAmount(''); setWdlOtp('');
       } catch (err: any) { setWdlStatus(`✗ ${err?.message || 'withdrawal failed'}`); }
       return;
     }
@@ -223,15 +257,12 @@ export function WalletPage() {
     setWdlBusy(true);
     setWdlStatus('processing...');
     try {
-      await userApi.requestWithdrawal({
-        address: wdlAddress.trim(),
-        amount: amt,
-        currency: expandedCoin!,
-        otp_code: wdlOtp || undefined,
-        network: wdlNetwork || undefined,
-      });
-      setWdlStatus('✓ submitted. check email to confirm.');
+      await userApi.requestWithdrawal({ ...body, otp_code: wdlOtp || undefined });
+      setWdlStatus(wdlDest === 'email'
+        ? '✓ submitted. check your email to confirm — recipient is verified at confirm.'
+        : '✓ submitted. check email to confirm.');
       setWdlAddress('');
+      setWdlEmail('');
       setWdlAmount('');
       setWdlOtp('');
       fetchHistory();
@@ -473,51 +504,81 @@ export function WalletPage() {
             <SearchSelect value={expandedCoin} options={coinPickerOptions} onChange={(c) => setExpandedCoin(c)} placeholder="search coin" style={{ flex: '0 0 160px' }} />
           </div>
 
+          {/* Destination: on-chain crypto address vs internal transfer to another user's email */}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <span style={{ width: '90px' }}>send to</span>
+            <div style={{ display: 'flex', gap: '14px' }}>
+              <span role="button" tabIndex={0} className="interact" onClick={() => switchDest('address')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchDest('address'); } }} style={{ color: wdlDest === 'address' ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>[crypto address]</span>
+              <span role="button" tabIndex={0} className="interact" onClick={() => switchDest('email')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchDest('email'); } }} style={{ color: wdlDest === 'email' ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>[email · internal]</span>
+            </div>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px', alignItems: 'center' }}>
-            {expandedNetworks.length > 1 && (
+            {wdlDest === 'address' ? (
               <>
-                <span>network</span>
-                {networkSelect(wdlNetwork, (v) => { setWdlNetwork(v); if (savedIdx !== '') { setSavedIdx(''); setWdlAddress(''); } })}
+                {expandedNetworks.length > 1 && (
+                  <>
+                    <span>network</span>
+                    {networkSelect(wdlNetwork, (v) => { setWdlNetwork(v); if (savedIdx !== '') { setSavedIdx(''); setWdlAddress(''); } })}
+                  </>
+                )}
+                {coinAddresses.length > 0 && (
+                  <>
+                    <span>saved</span>
+                    <select
+                      value={savedIdx}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setSavedIdx(v);
+                        if (v === '') { setWdlAddress(''); return; }
+                        const a = coinAddresses[Number(v)];
+                        if (a) { setWdlAddress(a.address); if (a.network) setWdlNetwork(a.network); }
+                      }}
+                      style={selectStyle}
+                    >
+                      <option value="">[choose whitelisted address]</option>
+                      {coinAddresses.map((a, i) => (
+                        <option key={i} value={i}>{(a.label || a.address)}{a.network ? ` · ${a.network.toUpperCase()}` : ''}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                <span>address</span>
+                <input
+                  type="text"
+                  value={wdlAddress}
+                  onChange={(e) => setWdlAddress(e.target.value)}
+                  required
+                  readOnly={wdlFromBook}
+                  placeholder="[destination_address]"
+                  style={wdlFromBook ? { borderColor: 'var(--brand-up)', color: 'var(--text-secondary)', cursor: 'not-allowed' } : undefined}
+                />
+              </>
+            ) : (
+              <>
+                <span>recipient</span>
+                <input
+                  type="email"
+                  value={wdlEmail}
+                  onChange={(e) => setWdlEmail(e.target.value)}
+                  required
+                  placeholder="recipient@email.com"
+                />
               </>
             )}
-            {coinAddresses.length > 0 && (
-              <>
-                <span>saved</span>
-                <select
-                  value={savedIdx}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSavedIdx(v);
-                    if (v === '') { setWdlAddress(''); return; }
-                    const a = coinAddresses[Number(v)];
-                    if (a) { setWdlAddress(a.address); if (a.network) setWdlNetwork(a.network); }
-                  }}
-                  style={selectStyle}
-                >
-                  <option value="">[choose whitelisted address]</option>
-                  {coinAddresses.map((a, i) => (
-                    <option key={i} value={i}>{(a.label || a.address)}{a.network ? ` · ${a.network.toUpperCase()}` : ''}</option>
-                  ))}
-                </select>
-              </>
-            )}
-            <span>address</span>
-            <input
-              type="text"
-              value={wdlAddress}
-              onChange={(e) => setWdlAddress(e.target.value)}
-              required
-              readOnly={wdlFromBook}
-              placeholder="[destination_address]"
-              style={wdlFromBook ? { borderColor: 'var(--brand-up)', color: 'var(--text-secondary)', cursor: 'not-allowed' } : undefined}
-            />
             <span>amount</span>
             <input type="number" step="any" value={wdlAmount} onChange={(e) => setWdlAmount(e.target.value)} required placeholder="0.00" />
             <span>otp_code{user?.otp_enabled ? ' *' : ''}</span>
             <input type="text" inputMode="numeric" maxLength={6} value={wdlOtp} onChange={(e) => setWdlOtp(e.target.value)} required={!!user?.otp_enabled} placeholder={user?.otp_enabled ? '[required — 2fa enabled]' : '[if 2fa enabled]'} />
           </div>
 
-          {wdlFromBook ? (
+          {wdlDest === 'email' && (
+            <div className="text-ter" style={{ fontSize: '11px' }}>
+              ▸ internal transfer to another exchange account. no network fee. the recipient must be an existing user — verified when you confirm.
+            </div>
+          )}
+
+          {wdlDest === 'address' && (wdlFromBook ? (
             <div style={{ fontSize: '11px' }} className="text-up">
               ✓ using whitelisted address
               <span role="button" tabIndex={0} className="interact text-ter" style={{ marginLeft: '10px' }}
@@ -532,15 +593,26 @@ export function WalletPage() {
                 [+ save address to whitelist]
               </span>
             </div>
-          ) : null}
+          ) : null)}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11px' }}>
-            <div className="text-sec">
-              fee: {wdlFee !== null ? wdlFee : (expandedNetworks.length > 1 ? 'select a network' : '—')} {wdlFee !== null ? expandedCoin.toUpperCase() : ''}
-              {expandedNetworks.length > 1 && wdlNetwork && <span className="text-ter"> · {wdlNetwork.toUpperCase()}</span>}
-            </div>
-            {netReceived !== null && netReceived > 0 && (
-              <div className="text-sec">recipient gets: {netReceived.toLocaleString(undefined, { maximumFractionDigits: 8 })} {expandedCoin.toUpperCase()}</div>
+            {wdlDest === 'email' ? (
+              <>
+                <div className="text-sec">fee: 0 {expandedCoin.toUpperCase()} <span className="text-ter">· internal</span></div>
+                {Number.isFinite(wdlAmtNum) && wdlAmtNum > 0 && (
+                  <div className="text-sec">recipient gets: {wdlAmtNum.toLocaleString(undefined, { maximumFractionDigits: 8 })} {expandedCoin.toUpperCase()}</div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="text-sec">
+                  fee: {wdlFee !== null ? wdlFee : (expandedNetworks.length > 1 ? 'select a network' : '—')} {wdlFee !== null ? expandedCoin.toUpperCase() : ''}
+                  {expandedNetworks.length > 1 && wdlNetwork && <span className="text-ter"> · {wdlNetwork.toUpperCase()}</span>}
+                </div>
+                {netReceived !== null && netReceived > 0 && (
+                  <div className="text-sec">recipient gets: {netReceived.toLocaleString(undefined, { maximumFractionDigits: 8 })} {expandedCoin.toUpperCase()}</div>
+                )}
+              </>
             )}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

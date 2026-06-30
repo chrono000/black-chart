@@ -41,8 +41,11 @@ export const userApi = {
   activatePasskey: (data: { challenge: string; credential: unknown; webauthn_user_id: string }) =>
     authPost<{ message: string }>('/user/activate-passkey', data),
 
-  // Withdrawal
-  requestWithdrawal: (data: { address: string; amount: number; currency: string; otp_code?: string; network?: string }) =>
+  // Withdrawal. For an internal (email) transfer, set network:'email' and put the
+  // recipient's email in `address` — the kit server branches on network==='email'
+  // and resolves the recipient at the confirm step. method:'email' is sent for
+  // parity with HollaEx's own clients (server keys off network/address, not method).
+  requestWithdrawal: (data: { address: string; amount: number; currency: string; otp_code?: string; network?: string; method?: string }) =>
     authPost<{ message: string }>('/user/request-withdrawal', { ...data, version: 'v4' }),
   confirmWithdrawal: (data: { token: string }) =>
     authPost<{ message: string; transaction_id?: string; fee?: number }>('/user/confirm-withdrawal', data),
