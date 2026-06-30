@@ -95,6 +95,12 @@ export function WalletPage() {
   const [wdlStatus, setWdlStatus] = useState('');
   const [wdlBusy, setWdlBusy] = useState(false);
   const [savedIdx, setSavedIdx] = useState(''); // selected whitelist-address index ('' = custom)
+  // Real withdrawals are 2-step on HollaEx: request emails a 6-digit code (version v4),
+  // then confirm-withdrawal broadcasts. 'form' → 'confirm' (enter code) → 'done'.
+  const [wdlPhase, setWdlPhase] = useState<'form' | 'confirm' | 'done'>('form');
+  const [wdlCode, setWdlCode] = useState('');
+  const [wdlTxid, setWdlTxid] = useState('');
+  const [wdlReq, setWdlReq] = useState<{ coin: string; amount: string; dest: string; isEmail: boolean; network?: string } | null>(null);
 
   const expandedCoinConfig = expandedCoin ? constants?.coins?.[expandedCoin] : null;
   const expandedNetworks = useMemo(() => networksFor(expandedCoinConfig), [expandedCoinConfig]);
@@ -217,6 +223,18 @@ export function WalletPage() {
     setWdlStatus('');
   };
 
+  // Reset the whole withdrawal flow (used by [close] and after a confirmed send).
+  const resetWithdrawal = () => {
+    setWdlPhase('form'); setWdlCode(''); setWdlTxid(''); setWdlReq(null);
+    setWdlAddress(''); setWdlEmail(''); setWdlAmount(''); setWdlOtp(''); setWdlStatus('');
+  };
+  const closeWithdrawPanel = () => { resetWithdrawal(); setExpandedCoin(null); };
+
+  // Switching coin/mode must never leave a stale confirm/done phase behind (a code
+  // is bound to the specific request that emailed it). Reset phase machinery only —
+  // not the in-progress form inputs — when the panel target changes.
+  useEffect(() => { setWdlPhase('form'); setWdlCode(''); setWdlTxid(''); setWdlReq(null); setWdlStatus(''); }, [expandedCoin, expandedMode]);
+
   const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(wdlAmount);
@@ -245,11 +263,14 @@ export function WalletPage() {
     }
 
     if (isPaper && paper) {
-      try {
-        paper.withdraw(expandedCoin!, amt, paperNetwork);
-        setWdlStatus(wdlDest === 'email' ? `✓ sent to ${body.address} (paper)` : '✓ withdrawal simulated (paper)');
-        setWdlAddress(''); setWdlEmail(''); setWdlAmount(''); setWdlOtp('');
-      } catch (err: any) { setWdlStatus(`✗ ${err?.message || 'withdrawal failed'}`); }
+      // Mirror the real 2-step UX in the demo: "code emailed" → enter code → send.
+      // Nothing leaves the balance until confirm (paper.withdraw runs there), and we
+      // never touch the real endpoint. Any code is accepted at confirm.
+      setWdlReq({ coin: expandedCoin!, amount: String(amt), dest: body.address, isEmail: wdlDest === 'email', network: paperNetwork });
+      setWdlCode('');
+      setWdlOtp('');
+      setWdlPhase('confirm');
+      setWdlStatus('✓ code emailed (simulated) — enter any 6 digits to confirm.');
       return;
     }
     // Real withdrawal: HollaEx requires OTP when 2FA is enabled, then emails a confirmation.
@@ -258,17 +279,54 @@ export function WalletPage() {
     setWdlStatus('processing...');
     try {
       await userApi.requestWithdrawal({ ...body, otp_code: wdlOtp || undefined });
-      setWdlStatus(wdlDest === 'email'
-        ? '✓ submitted. check your email to confirm — recipient is verified at confirm.'
-        : '✓ submitted. check email to confirm.');
-      setWdlAddress('');
-      setWdlEmail('');
-      setWdlAmount('');
+      // Step 1 only emailed a 6-digit confirmation code — the withdrawal is NOT sent
+      // yet. Advance to the confirm phase so the user can enter that code. Snapshot
+      // what was requested for the confirm summary; clear the (single-use) OTP.
+      setWdlReq({ coin: expandedCoin!, amount: String(amt), dest: body.address, isEmail: wdlDest === 'email' });
+      setWdlCode('');
       setWdlOtp('');
+      setWdlPhase('confirm');
+      setWdlStatus(wdlDest === 'email'
+        ? '✓ code emailed — enter it below to send the transfer. recipient is verified at confirm.'
+        : '✓ code emailed — enter it below to broadcast the withdrawal.');
+    } catch (err: any) {
+      setWdlStatus(`✗ ${err?.isTimeout ? 'request timed out — check Withdrawal History before retrying' : err.message || 'withdrawal failed'}`);
+    } finally {
+      setWdlBusy(false);
+    }
+  };
+
+  // Step 2: enter the emailed code → confirm-withdrawal broadcasts (or sends the
+  // internal transfer). Only now do balances/history actually change.
+  const handleConfirmWithdraw = async () => {
+    const code = wdlCode.trim();
+    if (!code) { setWdlStatus('✗ enter the confirmation code from your email'); return; }
+    // Paper mode: simulate confirmation locally — accept any code, never hit the API.
+    // The balance only moves now (on confirm), matching the real two-step flow.
+    if (isPaper && paper) {
+      if (!wdlReq) { setWdlStatus('✗ nothing to confirm'); return; }
+      try {
+        paper.withdraw(wdlReq.coin, parseFloat(wdlReq.amount), wdlReq.network);
+        setWdlTxid('');
+        setWdlPhase('done');
+        setWdlStatus(`✓ ${wdlReq.isEmail ? 'transfer sent' : 'withdrawal'} (paper)`);
+      } catch (err: any) { setWdlStatus(`✗ ${err?.message || 'withdrawal failed'}`); }
+      return;
+    }
+    setWdlBusy(true);
+    setWdlStatus('confirming...');
+    try {
+      const r = await userApi.confirmWithdrawal({ token: code });
+      const tx = (r && r.transaction_id) || '';
+      setWdlTxid(tx);
+      setWdlPhase('done');
+      setWdlStatus(tx
+        ? `✓ ${wdlReq?.isEmail ? 'transfer sent' : 'withdrawal broadcast'} · tx ${tx}`
+        : `✓ ${wdlReq?.isEmail ? 'transfer sent' : 'withdrawal confirmed'}`);
       fetchHistory();
       refreshBalance();
     } catch (err: any) {
-      setWdlStatus(`✗ ${err?.isTimeout ? 'request timed out — check Withdrawal History before retrying' : err.message || 'withdrawal failed'}`);
+      setWdlStatus(`✗ ${err?.isTimeout ? 'request timed out — check Withdrawal History before retrying' : err?.message || 'confirmation failed'}`);
     } finally {
       setWdlBusy(false);
     }
@@ -492,13 +550,15 @@ export function WalletPage() {
 
       {/* Withdrawal Panel */}
       {expandedCoin && expandedMode === 'withdraw' && (
-        <form onSubmit={handleWithdraw} style={{ margin: '15px 0', padding: '12px', border: '1px dashed var(--brand-down)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ margin: '15px 0', padding: '12px', border: '1px dashed var(--brand-down)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ marginBottom: '5px' }}>
             <span className="text-down" style={{ fontWeight: 'bold' }}>▸ withdraw {expandedCoin.toUpperCase()}</span>
-            <span role="button" tabIndex={0} className="interact text-ter" onClick={() => setExpandedCoin(null)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpandedCoin(null); }} style={{ marginLeft: '15px' }}>[close]</span>
+            <span role="button" tabIndex={0} className="interact text-ter" onClick={closeWithdrawPanel} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') closeWithdrawPanel(); }} style={{ marginLeft: '15px' }}>[close]</span>
             <span className="text-sec" style={{ marginLeft: '15px', fontSize: '11px' }}>available: {selectedAvail.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span>
           </div>
 
+          {wdlPhase === 'form' && (
+          <form onSubmit={handleWithdraw} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <span style={{ width: '90px' }}>coin</span>
             <SearchSelect value={expandedCoin} options={coinPickerOptions} onChange={(c) => setExpandedCoin(c)} placeholder="search coin" style={{ flex: '0 0 160px' }} />
@@ -617,11 +677,57 @@ export function WalletPage() {
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button type="submit" disabled={wdlBusy} className="text-down" style={{ borderColor: 'var(--brand-down)' }}>
-              {wdlBusy ? '[...]' : '[confirm_withdrawal →]'}
+              {wdlBusy ? '[...]' : '[send_code →]'}
             </button>
           </div>
+          </form>
+          )}
+
+          {wdlPhase === 'confirm' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="text-sec" style={{ fontSize: '11px' }}>
+              ✉ {isPaper ? 'demo — enter any 6 digits to' : 'a 6-digit code was emailed. enter it to'} {wdlReq?.isEmail ? 'send' : 'broadcast'}{' '}
+              <span style={{ color: 'var(--text-primary)' }}>{wdlReq?.amount} {(wdlReq?.coin || '').toUpperCase()}</span>
+              {wdlReq?.isEmail ? <> to <span style={{ color: 'var(--text-primary)' }}>{wdlReq?.dest}</span></> : ' on-chain'}.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px', alignItems: 'center' }}>
+              <span>code</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={wdlCode}
+                onChange={(e) => setWdlCode(e.target.value)}
+                placeholder={isPaper ? '[any 6 digits — demo]' : '[6-digit code from email]'}
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (!wdlBusy && wdlCode.trim()) handleConfirmWithdraw(); } }}
+              />
+            </div>
+            <div className="text-ter" style={{ fontSize: '11px' }}>▸ not sent until you confirm. internal transfers can't be reversed.</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span role="button" tabIndex={0} className="interact text-ter" style={{ fontSize: '11px' }} onClick={() => { setWdlPhase('form'); setWdlStatus(''); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setWdlPhase('form'); setWdlStatus(''); } }}>[‹ back]</span>
+              <button type="button" disabled={wdlBusy || !wdlCode.trim()} onClick={handleConfirmWithdraw} className="text-down" style={{ borderColor: 'var(--brand-down)' }}>
+                {wdlBusy ? '[...]' : '[confirm_withdrawal →]'}
+              </button>
+            </div>
+          </div>
+          )}
+
+          {wdlPhase === 'done' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="text-up" style={{ fontWeight: 'bold' }}>✓ {wdlReq?.isEmail ? 'transfer sent' : 'withdrawal broadcast'}</div>
+            <div className="text-sec" style={{ fontSize: '11px' }}>
+              {wdlReq?.amount} {(wdlReq?.coin || '').toUpperCase()}{wdlReq?.isEmail ? ` → ${wdlReq?.dest}` : ''}
+              {wdlTxid ? ` · tx ${String(wdlTxid).slice(0, 16)}…` : ''}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <span role="button" tabIndex={0} className="interact text-ter" style={{ fontSize: '11px' }} onClick={closeWithdrawPanel} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeWithdrawPanel(); } }}>[close]</span>
+            </div>
+          </div>
+          )}
+
           {wdlStatus && <div style={{ fontSize: '11px' }} className={wdlStatus.startsWith('✓') ? 'text-up' : wdlStatus.startsWith('✗') ? 'text-down' : 'text-sec'}>{wdlStatus}</div>}
-        </form>
+        </div>
       )}
 
       <PortfolioPerformance balance={balance} />
