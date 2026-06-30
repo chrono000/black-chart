@@ -287,8 +287,8 @@ export function WalletPage() {
       setWdlOtp('');
       setWdlPhase('confirm');
       setWdlStatus(wdlDest === 'email'
-        ? '✓ code emailed — enter it below to send the transfer. recipient is verified at confirm.'
-        : '✓ code emailed — enter it below to broadcast the withdrawal.');
+        ? '✓ code emailed — enter it to send the transfer. recipient is verified at confirm.'
+        : '✓ code emailed — enter it to broadcast the withdrawal.');
     } catch (err: any) {
       setWdlStatus(`✗ ${err?.isTimeout ? 'request timed out — check Withdrawal History before retrying' : err.message || 'withdrawal failed'}`);
     } finally {
@@ -677,7 +677,7 @@ export function WalletPage() {
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button type="submit" disabled={wdlBusy} className="text-down" style={{ borderColor: 'var(--brand-down)' }}>
-              {wdlBusy ? '[...]' : '[send_code →]'}
+              {wdlBusy ? '[...]' : (isPaper ? '[withdraw →]' : '[send_code →]')}
             </button>
           </div>
           </form>
