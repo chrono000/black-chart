@@ -176,6 +176,35 @@ nav {
 /* The ASCII chart is monospace ch-based; let it scroll if it can't shrink to fit. */
 .ascii-chart { max-width: 100%; overflow-x: auto; }
 
+/* ── Events list: compact two-line rows, click to reveal full detail ── */
+.event-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.event-row:hover { background: var(--bg-secondary); }
+.event-row-body { min-width: 0; }                 /* allow children to truncate, not overflow */
+.event-row-line1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; overflow-wrap: anywhere; }
+.event-tag { flex: 0 0 auto; }
+.event-row-line2 { font-size: 11px; margin-top: 2px; }
+.event-chev { flex: 0 0 auto; font-size: 11px; line-height: 1.6; }
+.event-detail {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 4px 14px;
+  padding: 8px 10px 12px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+}
+.event-detail-row { display: contents; }          /* label + value land directly in the grid */
+.event-detail-k { color: var(--text-tertiary); }
+.event-detail-v { word-break: break-all; }        /* long tx ids / addresses wrap, never overflow */
+.event-detail-body { grid-column: 1 / -1; margin-top: 4px; line-height: 1.4; }
+
 /* Responsive Breakpoints */
 @media (max-width: 900px) {
   .container {
@@ -227,4 +256,6 @@ nav {
     overflow: visible !important;
   }
   .earn-card { flex-basis: 100% !important; max-width: none !important; }
+  /* Event detail: tighter label column so values keep room on a phone. */
+  .event-detail { grid-template-columns: 84px 1fr; gap: 3px 10px; }
 }

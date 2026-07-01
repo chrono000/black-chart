@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useAuth } from '../lib/AuthContext';
 import { useExchange } from '../lib/ExchangeContext';
@@ -9,7 +9,7 @@ import { selectStyle } from '../lib/ui';
 import { safeStorage } from '../lib/storage';
 import { PortfolioPerformance } from '../components/PortfolioPerformance';
 import { SearchSelect } from '../components/SearchSelect';
-import type { CoinConfig, AddressBookEntry } from '../../api/types';
+import type { CoinConfig, AddressBookEntry, WalletAddress } from '../../api/types';
 
 type TxTab = 'deposits' | 'withdrawals';
 
@@ -53,6 +53,29 @@ const feeFor = (coin: CoinConfig | undefined | null, network: string): number | 
 // recipient is only verified by the server at the confirm step (USER_NOT_FOUND).
 const isValidEmail = (s: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());
 
+// xrp/xlm and the xlm/ton networks pack a destination tag/memo into the address
+// as "address:tag" (single colon). Both are required — funds sent without the tag
+// can be lost, so we split and surface both.
+const needsMemo = (coin: string, network: string): boolean => {
+  const c = (coin || '').toLowerCase(); const n = (network || '').toLowerCase();
+  return c === 'xrp' || c === 'xlm' || n === 'xlm' || n === 'ton';
+};
+const splitAddress = (raw: string): { address: string; tag: string } => {
+  const s = raw || ''; const i = s.indexOf(':');
+  return i >= 0 ? { address: s.slice(0, i), tag: s.slice(i + 1) } : { address: s, tag: '' };
+};
+// Existing deposit addresses live on user.wallet[] (GET /user) — there is NO
+// get-address endpoint. Match by currency, and by network for multi-chain coins.
+const findWalletAddress = (wallet: WalletAddress[] | undefined, coin: string, network: string): WalletAddress | undefined => {
+  if (!wallet || !wallet.length) return undefined;
+  const c = (coin || '').toLowerCase();
+  const forCoin = wallet.filter((w) => (w.currency || '').toLowerCase() === c && !!w.address);
+  if (!forCoin.length) return undefined;
+  const n = (network || '').toLowerCase();
+  if (n) return forCoin.find((w) => (w.network || '').toLowerCase() === n);
+  return forCoin[0];
+};
+
 // Defense-in-depth: block an obvious wrong-chain address for well-known networks.
 // Lenient (allow) for networks we don't recognize, to avoid blocking valid withdrawals.
 const addressLooksValid = (address: string, network: string): boolean => {
@@ -65,14 +88,17 @@ const addressLooksValid = (address: string, network: string): boolean => {
 };
 
 export function WalletPage() {
-  const { balance, isAuthenticated, isPaper, paper, refreshBalance, user } = useAuth();
+  const { balance, isAuthenticated, isPaper, paper, refreshBalance, refreshUser, user } = useAuth();
   const { constants, displayCurrency } = useExchange();
   const CCY = displayCurrency.toUpperCase();
 
   const [expandedCoin, setExpandedCoin] = useState<string | null>(null);
   const [expandedMode, setExpandedMode] = useState<'deposit' | 'withdraw' | null>(null);
   const [depositAddress, setDepositAddress] = useState<string>('');
+  const [depositTag, setDepositTag] = useState('');    // destination tag/memo for xrp/xlm/ton
   const [depositNetwork, setDepositNetwork] = useState('');
+  const [depositForCoin, setDepositForCoin] = useState(''); // coin the shown address belongs to (guards against a stale wrong-coin address on switch)
+  const panelRef = useRef<HTMLDivElement>(null);       // deposit/withdraw panel, scrolled into view on open
   const [depNetwork, setDepNetwork] = useState('');
   const [depBusy, setDepBusy] = useState(false);
   const [depAmount, setDepAmount] = useState('');
@@ -190,7 +216,9 @@ export function WalletPage() {
     setWdlStatus('');
     setSavedIdx('');
     setDepositAddress('');
+    setDepositTag('');
     setDepositNetwork('');
+    setDepositForCoin('');
     setDepAmount('');
     setDepMsg('');
     const nets = networksFor(expandedCoin ? constants?.coins?.[expandedCoin] : null);
@@ -198,6 +226,32 @@ export function WalletPage() {
     setDepNetwork(def);
     setWdlNetwork(def);
   }, [expandedCoin, expandedMode, constants]);
+
+  // Real deposits: an address may already exist on user.wallet[] (there is no
+  // get-address endpoint). Surface it directly instead of showing a generate
+  // button that would fail with "already has an address" (error 1001). Runs after
+  // the reset effect (declared earlier), and re-runs when the network or user changes.
+  useEffect(() => {
+    if (isPaper || expandedMode !== 'deposit' || !expandedCoin) return;
+    if (expandedNetworks.length > 1 && !depNetwork) return; // wait for a network choice
+    const net = expandedNetworks.length > 1 ? depNetwork : (expandedNetworks[0] || '');
+    const hit = findWalletAddress(user?.wallet, expandedCoin, expandedNetworks.length > 1 ? depNetwork : '');
+    if (hit) {
+      const { address, tag } = splitAddress(hit.address);
+      setDepositAddress(address);
+      setDepositTag(tag);
+      setDepositNetwork(hit.network || net || expandedCoin);
+      setDepositForCoin(expandedCoin);
+      setDepMsg('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPaper, expandedMode, expandedCoin, depNetwork, expandedNetworks, user]);
+
+  // Bring the deposit/withdraw panel into view on open — the balances table is long,
+  // so a panel rendered below it would otherwise be off-screen and easy to miss.
+  useEffect(() => {
+    if (expandedCoin && expandedMode) panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [expandedCoin, expandedMode]);
 
   const fetchHistory = () => {
     if (!isAuthenticated || isPaper) return; // paper history is read from the engine
@@ -385,6 +439,10 @@ export function WalletPage() {
   const coins = constants?.coins ? Object.values(constants.coins).filter((c) => c.active) : [];
   const selectedAvail = num(balance?.[`${expandedCoin}_available`]);
   const wdlFromBook = savedIdx !== '';
+  // Only treat an address as displayable if it belongs to the currently-selected coin.
+  // Guards against a 1-frame stale wrong-coin address between a coin switch and the
+  // reset/lookup effects (fund-critical: never show another coin's deposit address).
+  const depositReady = !!depositAddress && depositForCoin === expandedCoin;
   const wdlFee = feeFor(expandedCoinConfig, wdlNetwork);
   const wdlAmtNum = parseFloat(wdlAmount);
   const netReceived = wdlFee !== null && Number.isFinite(wdlAmtNum) ? Math.max(0, wdlAmtNum - wdlFee) : null;
@@ -465,7 +523,7 @@ export function WalletPage() {
 
       {/* Deposit Panel */}
       {expandedCoin && expandedMode === 'deposit' && (
-        <div style={{ margin: '15px 0', padding: '12px', border: '1px dashed var(--brand-up)' }}>
+        <div ref={panelRef} style={{ margin: '15px 0', padding: '12px', border: '1px dashed var(--brand-up)' }}>
           <div style={{ marginBottom: '8px' }}>
             <span className="text-up" style={{ fontWeight: 'bold' }}>▸ deposit {expandedCoin.toUpperCase()}</span>
             <span role="button" tabIndex={0} className="interact text-ter" onClick={() => setExpandedCoin(null)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpandedCoin(null); }} style={{ marginLeft: '15px' }}>[close]</span>
@@ -478,12 +536,12 @@ export function WalletPage() {
           {expandedNetworks.length > 1 && (
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
               <span className="text-ter" style={{ width: '90px' }}>network</span>
-              {networkSelect(depNetwork, (v) => { setDepNetwork(v); setDepositAddress(''); setDepositNetwork(''); }, !!depositAddress)}
-              {depositAddress && <span role="button" tabIndex={0} className="interact text-ter" onClick={() => { setDepositAddress(''); setDepositNetwork(''); }} style={{ fontSize: '11px' }}>[change network]</span>}
+              {networkSelect(depNetwork, (v) => { setDepNetwork(v); setDepositAddress(''); setDepositTag(''); setDepositNetwork(''); }, depositReady)}
+              {depositReady && <span role="button" tabIndex={0} className="interact text-ter" onClick={() => { setDepositAddress(''); setDepositTag(''); setDepositNetwork(''); }} style={{ fontSize: '11px' }}>[change network]</span>}
             </div>
           )}
 
-          {!depositAddress ? (
+          {!depositReady ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
                 disabled={depBusy || (expandedNetworks.length > 1 && !depNetwork)}
@@ -493,25 +551,38 @@ export function WalletPage() {
                   if (isPaper) {
                     setDepositAddress(fakeDepositAddress(expandedCoin, depNetwork));
                     setDepositNetwork(depNetwork || expandedNetworks[0] || expandedCoin);
+                    setDepositForCoin(expandedCoin);
                     setDepBusy(false);
                     return;
                   }
                   try {
                     const res = await userApi.createAddress(expandedCoin, depNetwork || undefined);
                     if (res.address) {
-                      setDepositAddress(res.address);
+                      const { address, tag } = splitAddress(res.address);
+                      setDepositAddress(address);
+                      setDepositTag(tag);
                       setDepositNetwork((res as any).network || depNetwork);
+                      setDepositForCoin(expandedCoin);
                     } else {
                       // HollaEx may generate the address asynchronously — surface the
                       // message and let the user re-check rather than dumping raw JSON.
                       setDepMsg((res as any).message || 'address is being generated — check again in a moment');
                     }
+                    // Keep user.wallet[] (the source of truth) in sync for next time.
+                    await refreshUser();
                   } catch (err: any) {
-                    setDepMsg(`✗ ${err?.isTimeout ? 'timed out — try again' : err?.message || 'could not generate address'}`);
+                    // 1001: an address already exists but create-address won't return it.
+                    // Re-read user.wallet[] — the auto-lookup effect then fills it in.
+                    if (/already has/i.test(err?.message || '') || err?.data?.code === 1001) {
+                      setDepMsg('fetching your existing address…');
+                      await refreshUser();
+                    } else {
+                      setDepMsg(`✗ ${err?.isTimeout ? 'timed out — try again' : err?.message || 'could not generate address'}`);
+                    }
                   } finally { setDepBusy(false); }
                 }}
               >
-                {depBusy ? '[generating...]' : (!isPaper && depMsg && !depMsg.startsWith('✗')) ? '[check_for_address]' : '[generate_address]'}
+                {depBusy ? '[working...]' : (!isPaper && depMsg && !depMsg.startsWith('✗')) ? '[check_for_address]' : '[generate_address]'}
               </button>
               {!isPaper && depMsg && <div className={depMsg.startsWith('✗') ? 'text-down' : 'text-ter'} style={{ fontSize: '11px' }}>{depMsg}</div>}
             </div>
@@ -524,9 +595,26 @@ export function WalletPage() {
               <div style={{ padding: '10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', wordBreak: 'break-all', fontFamily: 'monospace' }}>
                 {depositAddress}
               </div>
-              <div style={{ marginTop: '6px' }}>
-                <span role="button" tabIndex={0} className="interact text-ter" style={{ fontSize: '11px' }} onClick={() => { setDepositAddress(''); setDepositNetwork(''); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDepositAddress(''); setDepositNetwork(''); } }}>[new address]</span>
-              </div>
+              {/* Destination tag/memo — REQUIRED alongside the address on xrp/xlm/ton. */}
+              {depositTag ? (
+                <>
+                  <div className="text-down" style={{ fontSize: '11px', margin: '8px 0 4px', fontWeight: 'bold' }}>
+                    ⚠ destination tag / memo (REQUIRED — send with the address or funds are lost):
+                  </div>
+                  <div style={{ padding: '10px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--brand-down)', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                    {depositTag}
+                  </div>
+                </>
+              ) : needsMemo(expandedCoin, depositNetwork) && (
+                <div className="text-down" style={{ fontSize: '11px', marginTop: '6px' }}>
+                  ⚠ this network uses a destination tag/memo — make sure yours is included.
+                </div>
+              )}
+              {isPaper && (
+                <div style={{ marginTop: '6px' }}>
+                  <span role="button" tabIndex={0} className="interact text-ter" style={{ fontSize: '11px' }} onClick={() => { setDepositAddress(''); setDepositTag(''); setDepositNetwork(''); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDepositAddress(''); setDepositTag(''); setDepositNetwork(''); } }}>[new address]</span>
+                </div>
+              )}
             </>
           )}
 
@@ -550,7 +638,7 @@ export function WalletPage() {
 
       {/* Withdrawal Panel */}
       {expandedCoin && expandedMode === 'withdraw' && (
-        <div style={{ margin: '15px 0', padding: '12px', border: '1px dashed var(--brand-down)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div ref={panelRef} style={{ margin: '15px 0', padding: '12px', border: '1px dashed var(--brand-down)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ marginBottom: '5px' }}>
             <span className="text-down" style={{ fontWeight: 'bold' }}>▸ withdraw {expandedCoin.toUpperCase()}</span>
             <span role="button" tabIndex={0} className="interact text-ter" onClick={closeWithdrawPanel} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') closeWithdrawPanel(); }} style={{ marginLeft: '15px' }}>[close]</span>
