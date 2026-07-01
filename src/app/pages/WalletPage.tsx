@@ -250,7 +250,7 @@ export function WalletPage() {
   // Bring the deposit/withdraw panel into view on open — the balances table is long,
   // so a panel rendered below it would otherwise be off-screen and easy to miss.
   useEffect(() => {
-    if (expandedCoin && expandedMode) panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (expandedCoin && expandedMode) panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [expandedCoin, expandedMode]);
 
   const fetchHistory = () => {
@@ -467,59 +467,13 @@ export function WalletPage() {
       </div>
       <div className="divider" />
 
-      {/* General deposit/withdraw — pick any coin, not just the ones listed below */}
+      {/* General deposit/withdraw — pick any coin via the searchable dropdown in the
+          panel below. Panels render here (above the balances table) so the flow opens
+          right under these buttons instead of far down the page. */}
       <div style={{ display: 'flex', gap: '12px', marginBottom: '14px' }}>
         <button onClick={() => openGeneral('deposit')} style={{ borderColor: 'var(--brand-up)', color: 'var(--brand-up)' }}>[+ deposit]</button>
         <button onClick={() => openGeneral('withdraw')} style={{ borderColor: 'var(--brand-down)', color: 'var(--brand-down)' }}>[- withdraw]</button>
       </div>
-
-      <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ color: 'var(--text-tertiary)', borderBottom: '1px solid var(--border-light)' }}>
-            <th style={{ padding: '8px 0' }}>ASSET</th>
-            <th>AVAILABLE</th>
-            <th>IN_ORDER</th>
-            <th>TOTAL</th>
-            <th>VALUE_{CCY}</th>
-            <th>ACTION</th>
-          </tr>
-        </thead>
-        <tbody>
-          {coins.map((coin) => {
-            const avail = num(balance?.[`${coin.symbol}_available`]);
-            const bal = num(balance?.[`${coin.symbol}_balance`]);
-            const inOrder = bal - avail;
-            if (bal === 0 && !['usdt', 'btc', 'eth'].includes(coin.symbol)) return null;
-
-            const isDepActive = expandedCoin === coin.symbol && expandedMode === 'deposit';
-            const isWdlActive = expandedCoin === coin.symbol && expandedMode === 'withdraw';
-            const allowDep = coin.allow_deposit !== false;
-            const allowWdl = coin.allow_withdrawal !== false;
-
-            return (
-              <tr key={coin.symbol} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <td style={{ padding: '8px 0' }}><Link to={`/coin/${coin.symbol}`} className="text-primary">{coin.symbol.toUpperCase()}</Link></td>
-                <td>{avail.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
-                <td className="text-sec">{inOrder > 1e-9 ? inOrder.toLocaleString(undefined, { maximumFractionDigits: 8 }) : '-'}</td>
-                <td>{bal.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
-                <td className="text-sec">{(() => { const v = bal * priceOf(coin.symbol); return v > 0 ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'; })()}</td>
-                <td>
-                  {allowDep ? (
-                    <span role="button" tabIndex={0} className="interact" onClick={() => toggleExpand(coin.symbol, 'deposit')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(coin.symbol, 'deposit'); } }} style={{ color: isDepActive ? 'black' : '', backgroundColor: isDepActive ? 'var(--brand-up)' : '' }}>[dep]</span>
-                  ) : (
-                    <span className="text-ter" title="deposits disabled">[dep:off]</span>
-                  )}{' '}
-                  {allowWdl ? (
-                    <span role="button" tabIndex={0} className="interact" onClick={() => toggleExpand(coin.symbol, 'withdraw')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(coin.symbol, 'withdraw'); } }} style={{ color: isWdlActive ? 'black' : '', backgroundColor: isWdlActive ? 'var(--brand-down)' : '' }}>[wdl]</span>
-                  ) : (
-                    <span className="text-ter" title="withdrawals disabled">[wdl:off]</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
 
       {/* Deposit Panel */}
       {expandedCoin && expandedMode === 'deposit' && (
@@ -817,6 +771,56 @@ export function WalletPage() {
           {wdlStatus && <div style={{ fontSize: '11px' }} className={wdlStatus.startsWith('✓') ? 'text-up' : wdlStatus.startsWith('✗') ? 'text-down' : 'text-sec'}>{wdlStatus}</div>}
         </div>
       )}
+
+      <div className="text-sec" style={{ marginTop: '20px' }}>:: your_assets</div>
+      <div className="divider" />
+      <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ color: 'var(--text-tertiary)', borderBottom: '1px solid var(--border-light)' }}>
+            <th style={{ padding: '8px 0' }}>ASSET</th>
+            <th>AVAILABLE</th>
+            <th>IN_ORDER</th>
+            <th>TOTAL</th>
+            <th>VALUE_{CCY}</th>
+            <th>ACTION</th>
+          </tr>
+        </thead>
+        <tbody>
+          {coins.map((coin) => {
+            const avail = num(balance?.[`${coin.symbol}_available`]);
+            const bal = num(balance?.[`${coin.symbol}_balance`]);
+            const inOrder = bal - avail;
+            if (bal === 0 && !['usdt', 'btc', 'eth'].includes(coin.symbol)) return null;
+
+            const isDepActive = expandedCoin === coin.symbol && expandedMode === 'deposit';
+            const isWdlActive = expandedCoin === coin.symbol && expandedMode === 'withdraw';
+            const allowDep = coin.allow_deposit !== false;
+            const allowWdl = coin.allow_withdrawal !== false;
+
+            return (
+              <tr key={coin.symbol} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <td style={{ padding: '8px 0' }}><Link to={`/coin/${coin.symbol}`} className="text-primary">{coin.symbol.toUpperCase()}</Link></td>
+                <td>{avail.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                <td className="text-sec">{inOrder > 1e-9 ? inOrder.toLocaleString(undefined, { maximumFractionDigits: 8 }) : '-'}</td>
+                <td>{bal.toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
+                <td className="text-sec">{(() => { const v = bal * priceOf(coin.symbol); return v > 0 ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'; })()}</td>
+                <td>
+                  {allowDep ? (
+                    <span role="button" tabIndex={0} className="interact" onClick={() => toggleExpand(coin.symbol, 'deposit')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(coin.symbol, 'deposit'); } }} style={{ color: isDepActive ? 'black' : '', backgroundColor: isDepActive ? 'var(--brand-up)' : '' }}>[dep]</span>
+                  ) : (
+                    <span className="text-ter" title="deposits disabled">[dep:off]</span>
+                  )}{' '}
+                  {allowWdl ? (
+                    <span role="button" tabIndex={0} className="interact" onClick={() => toggleExpand(coin.symbol, 'withdraw')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(coin.symbol, 'withdraw'); } }} style={{ color: isWdlActive ? 'black' : '', backgroundColor: isWdlActive ? 'var(--brand-down)' : '' }}>[wdl]</span>
+                  ) : (
+                    <span className="text-ter" title="withdrawals disabled">[wdl:off]</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
 
       <PortfolioPerformance balance={balance} />
 
