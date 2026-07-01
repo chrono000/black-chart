@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Archives & macOS extraction cruft (never commit these)
+*.zip
+**/__MACOSX/
+.DS_Store
+
 # Local env / config (keep the example)
 .env
 .env.*
