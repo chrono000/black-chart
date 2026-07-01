@@ -36,10 +36,19 @@ function Layout() {
   const { host, isSandbox } = resolveApi();
   const systemStatus = isLoading ? 'connecting' : constants ? 'operational' : 'degraded';
 
-  const bannerBg = isPaper ? '#2563eb' : isSandbox ? '#d6a700' : 'var(--brand-down)';
-  const bannerText = isPaper
-    ? null
-    : `${isSandbox ? 'SANDBOX · TEST FUNDS' : 'LIVE · REAL FUNDS'} · ${host}`;
+  // Three banner states: paper (simulated), signed-out (browsing live data, can't move
+  // funds), and signed-in real/sandbox (real funds — make that unmistakable).
+  const loggedOutLive = !isAuthenticated && !isPaper;
+  const darkBanner = isPaper || loggedOutLive; // dark background → light text/button
+  const bannerBg = isPaper ? '#2563eb' : loggedOutLive ? 'var(--bg-tertiary)' : isSandbox ? '#d6a700' : 'var(--brand-down)';
+  const bannerMsg = isPaper
+    ? 'SIMULATED · PAPER TRADING'
+    : loggedOutLive
+      ? `NOT SIGNED IN · VIEWING ${host}`
+      : `${isSandbox ? 'SANDBOX · TEST FUNDS' : 'LIVE · REAL FUNDS'} · ${host}`;
+  const bannerBtn = darkBanner
+    ? { background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.5)', color: '#fff', fontSize: '10px', padding: '1px 6px', cursor: 'pointer', fontWeight: 'normal', letterSpacing: '0.5px' }
+    : { background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(0,0,0,0.4)', color: 'var(--bg-primary)', fontSize: '10px', padding: '1px 6px', cursor: 'pointer', fontWeight: 'normal', letterSpacing: '0.5px' };
 
   const navItems = [
     { path: '/', label: 'home' },
@@ -61,38 +70,15 @@ function Layout() {
           display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px',
           padding: '3px 8px', marginBottom: '10px',
           fontSize: '11px', fontWeight: 'bold', letterSpacing: '1px',
-          color: isPaper ? '#fff' : 'var(--bg-primary)',
+          color: darkBanner ? (isPaper ? '#fff' : 'var(--text-secondary)') : 'var(--bg-primary)',
           backgroundColor: bannerBg,
         }}
       >
+        <span>{bannerMsg}</span>
         {isPaper ? (
-          <>
-            <span>SIMULATED · PAPER TRADING</span>
-            <button
-              onClick={logout}
-              style={{
-                background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.5)',
-                color: '#fff', fontSize: '10px', padding: '1px 6px', cursor: 'pointer',
-                fontWeight: 'normal', letterSpacing: '0.5px',
-              }}
-            >
-              switch to live
-            </button>
-          </>
+          <button onClick={logout} style={bannerBtn}>switch to live</button>
         ) : (
-          <>
-            <span>{bannerText}</span>
-            <button
-              onClick={paperLogin}
-              style={{
-                background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(0,0,0,0.4)',
-                color: 'var(--bg-primary)', fontSize: '10px', padding: '1px 6px', cursor: 'pointer',
-                fontWeight: 'normal', letterSpacing: '0.5px',
-              }}
-            >
-              switch to simulated
-            </button>
-          </>
+          <button onClick={paperLogin} style={bannerBtn}>switch to simulated</button>
         )}
       </div>
       {/* Header */}

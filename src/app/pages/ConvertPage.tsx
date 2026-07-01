@@ -51,6 +51,22 @@ export function ConvertPage() {
     let cancelled = false;
     setQuoting(true);
     const id = setTimeout(async () => {
+      // Paper mode: quote purely from public oracle prices — never call the private
+      // quick-trade endpoint (there's no token in paper mode; keeps paper self-contained).
+      if (isPaper) {
+        try {
+          const px = await publicApi.getOraclePrices({ assets: `${from},${to}`, quote: 'usdt' });
+          const pf = num(px[from]);
+          const pt = num(px[to]);
+          if (!cancelled) {
+            if (pf > 0 && pt > 0) { setQuote({ receiving: (amtNum * pf) / pt, token: undefined, estimate: true }); setQuoting(false); }
+            else { setQuote(null); setQuoting(false); setStatus('✗ no quote available for this pair'); }
+          }
+        } catch (err: any) {
+          if (!cancelled) { setQuote(null); setQuoting(false); setStatus(`✗ ${err?.message || 'no quote available for this pair'}`); }
+        }
+        return;
+      }
       try {
         const q = await orderApi.getQuickTrade({ spending_currency: from, receiving_currency: to, spending_amount: String(amtNum) });
         const receiving = num(q.receiving_amount);
@@ -61,17 +77,6 @@ export function ConvertPage() {
         throw new Error('no liquidity');
       } catch (err: any) {
         if (cancelled) return;
-        if (isPaper) {
-          try {
-            const px = await publicApi.getOraclePrices({ assets: `${from},${to}`, quote: 'usdt' });
-            const pf = num(px[from]);
-            const pt = num(px[to]);
-            if (pf > 0 && pt > 0) {
-              if (!cancelled) { setQuote({ receiving: (amtNum * pf) / pt, token: undefined, estimate: true }); setQuoting(false); }
-              return;
-            }
-          } catch { /* fall through */ }
-        }
         setQuote(null);
         setQuoting(false);
         setStatus(`✗ ${err?.message || 'no quote available for this pair'}`);

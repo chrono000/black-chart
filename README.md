@@ -1,4 +1,4 @@
-# Black Chart
+# Black Chart UI
 
 A minimalist, monospace **terminal-style crypto exchange** front-end for the
 [HollaEx](https://apidocs.hollaex.com/) API. Markets, an ASCII candlestick chart
@@ -7,6 +7,21 @@ WebSocket, real order placement, wallet deposits/withdrawals, and full account
 management — all rendered in a single font on a black canvas.
 
 Built with React 19 + TypeScript + Vite.
+
+## Modes: paper vs. real
+
+The app runs against the **live** HollaEx API for all public market data, and has
+two account modes:
+
+- **Not signed in → paper trading (simulated).** Anyone can hit *switch to
+  simulated* (top banner) or open `?paper` and get a fully working exchange —
+  place orders, convert, stake, deposit/withdraw — backed by a local simulated
+  balance. **No real funds, no money-moving API calls.** Great for demos/embeds.
+- **Signed in → your real account.** Log in with your own HollaEx credentials and
+  every action (trade, deposit, withdraw, convert) uses the real HollaEx endpoints
+  with your bearer token.
+
+No credentials or secrets are stored in this repo — you bring your own account.
 
 ## Data & API
 
@@ -59,10 +74,10 @@ A static `dist/` has **no Vite proxy**, so configure where the API lives via env
    `/api/* → https://api.hollaex.com/v2/*` and `/stream → wss://api.hollaex.com/stream`.
    No env needed — the defaults (`/api`, `/stream`) just work.
 
-2. **Direct (no proxy):** point the app straight at HollaEx. HollaEx CORS allows
-   this for all origins (verified — no config needed), but the reverse-proxy option
-   above is still preferred so your bearer token stays same-origin and you get
-   rate-limit shielding:
+2. **Direct (no proxy):** point the app straight at HollaEx. This works when the
+   HollaEx API allows browser (CORS) requests from your deploy origin; the
+   reverse-proxy option above is still preferred so your bearer token stays
+   same-origin and you get rate-limit shielding:
 
    ```bash
    # .env.production

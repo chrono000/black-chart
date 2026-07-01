@@ -17,10 +17,6 @@ dist-ssr
 .env.*
 !.env.example
 
-# Bundled HollaEx API spec — keep the extracted yaml, drop the zip + mac cruft
-swagger.zip
-**/__MACOSX/
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
